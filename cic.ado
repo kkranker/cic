@@ -184,6 +184,7 @@ struct cic_result {
 	real rowvector con, dci, dcilowbnd, dciuppbnd
 }
 
+
 // CIC CALLER -- THIS FUNCTION READS STATA DATA INTO MATA AND CALLS THE MAIN CIC ROUTINE
 void cic_caller(string scalar y_var, string scalar treat_var, string scalar post_var, string scalar touse_var, string scalar at_local, string scalar vce, |string scalar wgt_var)
 {
@@ -191,7 +192,7 @@ void cic_caller(string scalar y_var, string scalar treat_var, string scalar post
 	//         Name of local macro containing quantiles of interest, ranging from 0 to 100
 	//         Dummy indicating whether to calculation of SE is needed
 	//         Name of variable with fweight or iweight (optional)
-	// Output: Results are returned to a Stata matrix named `cic_estimates'
+	// Output: Results are returned to a Stata matrix named `cic_estimates' [a 4 x (1+k) row matrix with labels]
 
 	// get data into mata
 	// rows with missing data are already dropped by -marksample- in .ado file
@@ -212,7 +213,7 @@ void cic_caller(string scalar y_var, string scalar treat_var, string scalar post
 
 	// call the main CIC routine
 	if (args()==7) result = cic(dta,at,vce,wgt)  // with weights
-	else           result = cic(dta,at,vce)       // without weights
+	else           result = cic(dta,at,vce)      // without weights
 
 	// save results into a Stata matrix (tempname `cic_estimates')
 	stata("tempname cic_estimates")
@@ -276,7 +277,8 @@ struct cic_result scalar cic(real matrix dta, real vector at, string scalar vce,
 		F01=runningsum(prob(Y01,YS,select(dta[.,4],(treat:==0 :& post:==1))))
 		F10=runningsum(prob(Y10,YS,select(dta[.,4],(treat:==1 :& post:==0))))
 		F11=runningsum(prob(Y11,YS,select(dta[.,4],(treat:==1 :& post:==1))))
-		F00[length(F00)]=1 // because of rounding, sum of weights might be slightly different than one
+		// because of rounding, sum of weights might be slightly different than one
+		F00[length(F00)]=1 
 		F01[length(F01)]=1
 		F10[length(F10)]=1
 		F11[length(F11)]=1
@@ -293,7 +295,7 @@ struct cic_result scalar cic(real matrix dta, real vector at, string scalar vce,
 
 	// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 	result.dciuppbnd = cic_upper(F00,F01,F10,F11,YS,YS01,at)
-	
+
 	return(result)
 } // end of cic
 
@@ -527,10 +529,14 @@ YS = (1\2\3\4\5)
 /* 4    = */ cdfinv_brckt(.9999, P, YS)
 /* 5    = */ cdfinv_brckt(1    , P, YS)
 
+mata describe
+mata memory
+
+mata which mm_bs
+
 
 end
 /* * * * *  END OF MATA BLOCK * * * * */
-
 
 
 
@@ -550,9 +556,9 @@ set tracedepth 2
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 500
+local Nreps = 1000
 if 00     	local vce vce(bootstrap, reps(`Nreps'))
-else if 0	local vce vce(bspctile , reps(`Nreps'))
+else if 01	local vce vce(bspctile , reps(`Nreps'))
 else       	local vce ""
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
@@ -562,12 +568,14 @@ else       	local vce ""
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 // load data
+
+cd "C:\Users\keith\Desktop\CIC\"
 qui {
 	infix y 1-4 after 7-8 high 9-10 male 11-12 marital 13-14 manu 17-18 ///
 		constr 19-20 head 21-22  neck 23-24 upper_extr 25-26   trunk 27-28  ///
 		low_back 29-30 lower_extr 31-32 occ_dis 33-34 state 39-41 v18 37-38 ///
 		age 42-44 prev_earn 45-60 ///
-		using "C:\Projects\Americhoice_Data\Matlab_CIC_Routine\mvd.dat"
+		using A_I_Matlab\mvd.dat
 
 	gen ind=(age<99) & (marital<8) & (male<9) & (manu<8) & (constr<8) & (v18<9)
 	replace head=head==1
@@ -596,7 +604,12 @@ qui {
 }
 set seed 1
 
-// check tabulations
+cap log close 
+log using cid_test_aid_data.log, replace
+
+mac list _Nreps _vce
+
+// Table 1
 count
 tabstat y ly , by(high_after) s(count mean sd min p25 p50 p75 p90 max) columns(s)  labelwidth(30) nototal format(%9.2f)
 
@@ -605,14 +618,23 @@ reg y high##after
 reg ly high##after
 
 // CIC estimates from A&I Appendix
-timer on 1
+// Table 2
+timer on 2
 cic  y high after ,  at(25 50 75 90) `vce'
 cic ly high after ,  at(50)          `vce'
+timer off 2
+timer list 2
+
+// Table 3
+timer on 3
 cic  y high after ,  at(25 50 75 90) `vce' untreated
 cic ly high after ,  at(50)          `vce' untreated
-timer off 1
-timer list
+timer off 3
+timer list 3
 exit
+
+log close 
+
 
 // compare vce() option above to the bootstrap prefix
 bootstrap , reps(`Nreps') strata(high after) : cic y  high after ,  at(25 50 75 90)
