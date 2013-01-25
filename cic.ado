@@ -36,10 +36,10 @@ clear all
 *    regopt(opts)             any other options are passed through to the regression command used to adjust for covariates (assuming there is a control varlist)
 
 * Weights may be iweights or fweights.  Weights are not allowed with vce(boostrap).
-*  fweights, but not iweights, work with vce( ??????????????? ) 
 
 program define cic, eclass byable(recall)
 	version 11.2
+	ereturn clear
 
 	// parse arguments
 	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fw iw]  ///
@@ -64,10 +64,15 @@ program define cic, eclass byable(recall)
 		local n=r(sum)
 		qui count if `touse'
 		local n_obs=r(N)
+// error -- add check non-integer weights allowed with cic bootstrap
+// add documentation that *  fweights, but not iweights, work with vce( ??????????????? )
+// in documentation, talk about why bootstrap: prefix might be needed (longitudinal data, sample by id instead of pre/post groups)
+// vce(????) is equivalent to bootstrap:
 	}
 	else {
 		qui count if `touse'
 		local n=r(N)
+		local n_obs=r(N)
 	}
 
 	// parse percentiles
@@ -82,12 +87,12 @@ program define cic, eclass byable(recall)
 		cic_vce_parse `treat' `post' [`weight'`exp'], `vce'
 		local vce = r(vce)
 		local usebspctile = r(usebspctile)
-		if inlist( "`vce'", "bootstrap", "bspctile" ) {
+		if ("`vce'"=="bootstrap") {
 			// bootstrap the cic command (no SEs)
 return list
 			bootstrap _b, reps( `=r(reps)' ) `r(bsopts)' : cic `y' `treat' `post' `varlist' if `touse' [`weight'`exp'], at(`at')
 return list
-			if `usebspctile' {
+			if "bspctile"=="`vce'" {
 			  if `=r(reps)' < 1000 nois di as error "Warning: More bootstrap repetitions might be needed with vce(bspctile)."
 			  tempname ci_se
 			  mata : bs_se( "e(ci_percentile)", "`ci_se'" )
@@ -114,26 +119,38 @@ return list
 	// implement mata CIC routine
 	if "`untreated'"=="" {
 		// default - effect of treatment on the treated
-		mata: cic_caller( "`y'", "`treat'", "`post'", "`touse'", "at", "`vce'" `wtexp_caller')
+		mata: cicresult = cic_caller( "`y'", "`treat'", "`post'", "`touse'", "at", "`vce'" `wtexp_caller')
 	}
 	else {
 		// option - effect of treatment on the untreated
 		// just switch `treat' variable and use -e(b)
 		tempvar untreated
 		gen `untreated' = `treat'==0
-		mata: cic_caller( "`y'", "`untreated'", "`post'", "`touse'", "at", "`vce'" `wtexp_caller')
+		mata: cicresult = cic_caller( "`y'", "`untreated'", "`post'", "`touse'", "at", "`vce'" `wtexp_caller')
 		matrix `cic_estimates' = -`cic_estimates'
 	}
 
-	// post results to ereturn
-	ereturn clear
-	ereturn post `cic_estimates' [`weight'`exp'], depname("`y'") obs(`n') esample(`touse')
-	ereturn display
-//	ereturn local cmd = "cic"
-	ereturn local command = "cic"
-	ereturn local commandline civ `0'
-	if !missing("`weight'") ereturn scalar n_obs=`n_obs'
+local bsreps=10
 
+	// post results to ereturn
+	if `bsreps' {
+		// post boostrapped estimates with standard errors using bstat
+		bstat  using `bstempfile', stat(e(results)) title(Changes in Changes (CIC))
+ereturn list
+char list
+	}
+	else {
+		// otherwise just use ereturn to get pretty estimates table
+		tempname eresults
+		mat `eresults' = e(results)
+		ereturn post `eresults' [`weight'`exp'], depname("`y'") obs(`n') esample(`touse')
+ereturn list
+char list
+	}
+	if inlist("`vce'","none","") ereturn local command = "cic"
+	else                         ereturn local cmd = "cic"
+	ereturn local cmdline cic `0'
+	if !missing("`weight'") ereturn scalar n_obs=`n_obs'
 
 // graph results
 /*
@@ -144,7 +161,6 @@ matrix b = b'
 keep in 1/3
 svmat b, names("b")
 */
-
 
 end // end of cic program definition
 
@@ -167,7 +183,6 @@ program define cic_vce_parse, rclass
 		local stratvars : copy local varlist
 		syntax [, Reps(integer 1000) strata(string asis) notable *]
 		if mi("`strata'") local strata : copy local stratvars
-		return local  usebspctile=( "bspctile"=="`vce'" )
 		return local  bsopts  strata(`strata') `=cond("bspctile"=="`vce'","notable","`table'")' `options'
 		return scalar reps  = `reps'
 		if !missing("`weight'") {
@@ -194,7 +209,11 @@ mata set matalnum on /* drop this later */
 
 // STRUCTURE FOR RETURNING RESULTS
 struct cic_result {
+	// main results
 	real rowvector con, dci, dcilowbnd, dciuppbnd
+
+	// store a few inputs
+	real rowvector at
 }
 
 
@@ -230,70 +249,104 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 	// Select the rows of wgt belonging to the treat*post groups
 	if (args()==7) {
 		real colvector wgt, W00, W01, W10, W11
-		st_view(wgt=.,.,wgt_var,touse_var) 
+		st_view(wgt=.,.,wgt_var,touse_var)
 		st_select(W00=.,wgt,(treat:==0 :& post:==0))
 		st_select(W01=.,wgt,(treat:==0 :& post:==1))
 		st_select(W10=.,wgt,(treat:==1 :& post:==0))
 		st_select(W11=.,wgt,(treat:==1 :& post:==1))
-	}	
-		
-	// Results will be returned into a structure w/ 4 vectors con, dci, lower, upper
+	}
+
+	// Results will be returned into a structure w/ 4 vectors for con, dci, lower, upper
 	struct cic_result scalar result
 
 	// Call the main CIC routine
-	if (args()==6) result=cic(Y00,Y01,Y10,Y11,at)                 // without weights 
-	else           result=cic(Y00,Y01,Y10,Y11,at,W00,W01,W10,W11) // with weights 
+	if (args()==6) result=cic(Y00,Y01,Y10,Y11,at)                 // without weights
+	else           result=cic(Y00,Y01,Y10,Y11,at,W00,W01,W10,W11) // with weights
 
-// check vs. my old, slower routine
-if (01) {
-	struct cic_result scalar result2
-	if (args()==6) result2=cic_seperate(Y00,Y01,Y10,Y11,at)                 // without weights  
-	else           result2=cic_seperate(Y00,Y01,Y10,Y11,at,W00,W01,W10,W11) // with weights 	
-	if (result==result2) "Elements are equal to old method"
-	else {
-		result.con
-		result.dci
-		result.dcilowbnd
-		result.dciuppbnd
-		result2.con
-		result2.dci
-		result2.dcilowbnd
-		result2.dciuppbnd
-		_error( "Elements not equal")
-	}
-}
+	// Return results into a Stata matrix too
+	string matrix colfulllabels
+	st_matrix("e(at)",(result.at))
+	st_matrix("e(results)", (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+	// Label the columns of the matrix
+	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("p":+strofreal(at*100))))'))
+	st_matrixcolstripe("e(results)", colfulllabels)
+	st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
+	st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
+	st_numscalar( "e(N_strata)", 4)
+	st_numscalar( "e(N)"       , rows(y))
 
-/*	
-// need "if bootstrap" ...
-    real scalar z
-	struct cic_result scalar resultBS
+real scalar bsreps, nodots
+bsreps=20
+nodots = 0
+_error( "need to pass bsreps and nodots as arguements.")
+_error( "also, switch bootstrap --> fullbootstrap and bspctile as a followup to bstat ")
 
-	"Start bootstraps"
-	if (args()==3) {
-		for(z=1; z<=250; ++z) {
-			resultBS=cic(drawsmpl(Y00),drawsmpl(Y01),drawsmpl(Y10),drawsmpl(Y11),at)
+	if (bsreps) {
+		real scalar b
+		struct cic_result scalar bs_loop
+		real matrix bsdata
+		bsdata=J(bsreps,4*(1+length(at)),.)
+
+		// header for dots
+		if (nodots==0) {
+			printf( "{txt}\nBootstrap replications ({res}%g{txt})\n", bsreps)
+			display( "{txt}{hline 4}{c +}{hline 3} 1 " +
+				"{hline 3}{c +}{hline 3} 2 " + "{hline 3}{c +}{hline 3} 3 " +
+				"{hline 3}{c +}{hline 3} 4 " + "{hline 3}{c +}{hline 3} 5 ")
 		}
 
+		if ((args()==4) & (round(wgt)!=wgt)) _error( "Mata bootstrapping does not work with non-integer weights." )
 
-	}
-	else if ((args()==4) & (round(wgt):==wgt)) {
-		for(z=1; z<=250; ++z) {
-			resultBS=cic(drawsmpl(Y00,W00),drawsmpl(Y01,W01),drawsmpl(Y10,W10),drawsmpl(Y11,W11),at)
-		}
+		for(b=1; b<=bsreps; ++b) {
+			if (args()==6) bs_loop=cic(drawsmpl(Y00),drawsmpl(Y01),drawsmpl(Y10),drawsmpl(Y11),at)                 // without weights
+			else           bs_loop=cic(drawsmpl(Y00,W00),drawsmpl(Y01,W01),drawsmpl(Y10,W10),drawsmpl(Y11,W11),at) // with frequency weights
 
-	}
-	else ( "Bootstrapping does not work with non-integer weights." )
+			// save into return structure
+			bsdata[b,.]  =(bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd)
 
-	"End bootstraps"
-*/
+			// show dots
+			if (missing((bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd))) {
+				if (nodots==0) printf( "{err}x{txt}")
+			}
+			else if (nodots==0) printf( ".")
+			if (nodots==0) {
+				if (mod(b,50)==0) printf( " %5.0f\n",b)
+				displayflush()
+			}
 
-	// save results into a Stata matrix (tempname `cic_estimates')
-	stata("tempname cic_estimates")
-	st_matrix(st_local("cic_estimates"), (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
-	st_matrixcolstripe(st_local("cic_estimates"), ((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("p":+strofreal(at*100))))')))
+		} // end loop through bs iterations
+		if (nodots==0 & mod(b-1,50)) display("")
 
-	// DONE.  RETURN STRUCTURE W/ FOUR ROW VECTORS.
-	// EACH VECTOR has mean estimate in first column, plus one column for each element of "at"
+		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
+		stata( "preserve" )
+		  string rowvector bstempfile, bstempvars
+
+		  // clear data (after preserve) and fill with bsdata matrix
+		  st_dropvar(.)
+		  st_addobs(rows(bsdata))
+		  bstempvars=strtoname("v":+strofreal(1::cols(bsdata)))'
+		  st_store(.,st_addvar("double",bstempvars), bsdata)
+
+		  // setup file for bstat command
+		  st_global( "_dta[bs_version]" , "3")
+		  st_global( "_dta[N]"          , strofreal(rows(y)))
+		  st_global( "_dta[N_strata]"   , "4")
+		  st_global( "_dta[strata]"     , (treat_var + " " + post_var))
+		  st_global( "_dta[command]"    , "cic")
+		  for(b=1; b<=cols(bsdata); ++b) {
+			 st_global( (bstempvars[1,b]+"[colname]"), colfulllabels[b,2])
+			 st_global( (bstempvars[1,b]+"[coleq]")  , colfulllabels[b,1])
+		  }
+
+		  // save as `bstempfile'
+		  bstempfile=st_tempfilename()
+		  st_local( "bstempfile",bstempfile)
+		  stata(( "qui save " + bstempfile ))
+		stata( "restore" )
+	} // done bootstrapping
+
+
+	// DONE.  Pass results back to caller
 	return(result)
 }
 
@@ -309,13 +362,24 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	//            - Y11 is treatment group in post period
 	//   (5)     Vector with k>=1 quantiles of interest, ranging from 0 to 1
 	//   (6)-(9) (Optional) Column with fweights or iweights for Y00, Y01, Y10, and Y11 (respectively)
-	// Output: Structure with four vectors. Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
+	//
+	// Output: One structure (cic_result) with four row vectors.
+	//   Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
+	//   (1) result.con       = CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
+	//   (2) result.dci       = CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
+	//   (3) result.dcilowbnd = LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	//   (4) result.dciuppbnd = UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+
+	// The code in cic() is somewhat convoluted because I am
+	// calculating all four vectors simultaneously.
+	// See the NOTE (below, at the bottom of the file)
+	// for alternative routines that are much more clear
+	// and accessible. The alternatives produce
+	// identical results. However redundant calculations lead to
+	// slower run-times.
 
 	// Need all or none of args (6)-(9)
 	if (args()>5 & args()!=9) _error(( "Expected 5 or 9 arguements, but received " + strofreal(args())))
-		
-	// Declare variables
-	struct cic_result scalar result
 
 	// Vector with support points for all four groups combined (YS) and the comparison-post group (YS01)
 	real colvector YS, YS01
@@ -365,6 +429,9 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	}
 	FCO[length(FCO)]=FDCI[length(FDCI)]=FLB[length(FLB)]=FUB[length(FUB)]=1   // =1 in last row
 
+	// Results will be returned into a structure w/ 4 vectors for con, dci, lower, upper
+	struct cic_result scalar result
+
 	// CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
 	// calculate the continuous outcomes CIC estimator
 	// matrix has mean estimate in first column, plus one column for each element of "at"
@@ -408,7 +475,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	}
 
 	// DONE.  RETURN STRUCTURE W/ FOUR ROW VECTORS.
-	// EACH VECTOR has mean estimate in first column, plus one column for each element of "at"
+	// Each vector has mean estimate in first column, plus one column for each element of "at"
 	return(result)
 } // end of cic
 
@@ -474,28 +541,22 @@ real colvector drawsmpl(real colvector x, |real colvector wgt)
 	//         2. (Optional) Frequency weights
 	// Output: Vector with a simple random sample
 	real scalar N
-	if (args()==1|wgt==0) {
+	if ((args()==1)|(wgt==0)) {
 		N = rows(x)
 		return(x[ceil(runiform(N,1):*N),1])
 	}
 	else {
 		real colvector exp
 		real scalar i,j,w
-		N = sum(wgt) // assume weights are integers (I check this in the main CIC function befor calling this sub-routine)
+		N = sum(wgt) // assume weights are integers (I check this once in the main CIC function--before calling this sub-routine hundreds of times)
 		// I thought it might be faster to just "expand" the dataset, then draw from it
 		exp=J(N,1,.)
-		i=1
 		j=1
-		while(i<=rows(x)) {
-			w=1
-			while (w<=wgt[i]) {
-				exp[j]=x[i]
-				j++
-				w++
+		for (i=1;i<=rows(x);i++) {
+			for (w=1;w<=wgt[i];w++) {
+				exp[j]=x[i]; j++
 			}
-			i++
 		}
-		exp
 		return(exp[ceil(runiform(N,1):*N),1])
 	}
 }
@@ -545,7 +606,6 @@ YS
 drawsmpl(YS)
 drawsmpl(YS,(10\1\1\1\0))
 
-
 mata describe
 mata memory
 
@@ -555,7 +615,6 @@ end
 
 
 cd "C:\Users\keith\Desktop\CIC\"
-include cic_seperate_subroutines.ado.ado
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -574,7 +633,7 @@ set tracedepth 2
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 250
+local Nreps = 1000
 if 0     	local vce vce(bootstrap, reps(`Nreps'))
 else if 0	local vce vce(bspctile , reps(`Nreps'))
 else       	local vce " "
@@ -637,10 +696,11 @@ reg ly high##after
 // CIC estimates from A&I Appendix
 // Table 2
 timer on 2
-cic  y high after ,  at(25 50 75 90) `vce' 
+cic  y high after ,  at(25 50 75 90) `vce'
 cic ly high after ,  at(50)          `vce'
 timer off 2
 timer list 2
+exit
 
 // Table 3
 timer on 3
@@ -651,7 +711,7 @@ timer list 3
 
 log close
 
-
+exit
 // compare vce() option above to the bootstrap prefix
 bootstrap , reps(`Nreps') strata(high after) : cic y  high after ,  at(25 50 75 90)
 
@@ -672,7 +732,7 @@ set seed 1
 cic  y high after ,  at(25 50 75 90) vce(bspctile , reps(`Nreps'))
 */
 
-exit 
+exit
 
 // we should get an error if try to use weights
 cap nois {
@@ -726,3 +786,247 @@ cic y treat post,  at(10(10)90)
 replace y = ceil(y/50)*50
 tab y
 cic y treat post,  at(10(10)90)
+
+
+exit
+
+
+
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+// NOTE:
+// The code in cic() is somewhat convoluted because I am
+// calculating all four vectors simultaneously.
+// The alternative routines, provided here, are much
+// more clear and accessible. These alternatives produce
+// identical results to cic(). However redundant calculations
+// lead to slower runtimes.
+// - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
+
+version 11.2
+mata:
+mata clear
+mata set matastrict on
+mata set matafavor speed
+
+struct cic_result scalar cic_seperate(real colvector Y00, real colvector Y01, real colvector Y10, real colvector Y11, real rowvector at, | real colvector W00, real colvector W01, real colvector W10, real colvector W11 )
+{
+	// Inputs:
+	//   (1)-(4) Four column vectors with data.
+	//            - Y00 is control group in pre-period
+	//            - Y01 is control group in post period
+	//            - Y10 is treatment group in post period
+	//            - Y11 is treatment group in post period
+	//   (5)     Vector with k>=1 quantiles of interest, ranging from 0 to 1
+	//   (6)-(9) (Optional) Column with fweights or iweights for Y00, Y01, Y10, and Y11 (respectively)
+	//
+	// Output: One structure (cic_result) with four row vectors.
+	//   Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
+	//   (1) result.con       = CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
+	//   (2) result.dci       = CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
+	//   (3) result.dcilowbnd = LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	//   (4) result.dciuppbnd = UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+
+	// Need all or none of args (6)-(9)
+	if (args()>5 & args()!=9) _error(( "Expected 5 or 9 arguements, but received " + strofreal(args())))
+
+	// Declare variables
+	real colvector YS, YS01
+	real colvector F00, F01, F10, F11
+	struct cic_result scalar result
+
+	// Vector with support points for all four groups combined (YS) and the comparison-post group (YS01)
+	YS01 = uniqrows(Y01)
+	YS   = uniqrows(Y00\YS01\Y10\Y11)
+
+	// Vector with CDF functions of the four treat*post groups (F00,F01,F10,F11)
+	// CDFs (w/ and w/out weights declared)
+	if (args()==5) {
+		// CDFs without weights
+		F00=runningsum(prob(Y00,YS))
+		F01=runningsum(prob(Y01,YS))
+		F10=runningsum(prob(Y10,YS))
+		F11=runningsum(prob(Y11,YS))
+	}
+	else {
+		// CDFs with weights
+		F00=runningsum(prob(Y00,YS,W00))
+		F01=runningsum(prob(Y01,YS,W01))
+		F10=runningsum(prob(Y10,YS,W10))
+		F11=runningsum(prob(Y11,YS,W11))
+		// because of rounding, sum of weights might be slightly different than one
+		F00[length(F00)]=1
+		F01[length(F01)]=1
+		F10[length(F10)]=1
+		F11[length(F11)]=1
+	}
+
+	// CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
+	result.con = cic_con(F00,F01,F10,F11,YS,YS01,at)
+
+	// CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
+	result.dci = cic_dci(F00,F01,F10,F11,YS,YS01,at)
+
+	// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	result.dcilowbnd = cic_lower(F00,F01,F10,F11,YS,YS01,at)
+
+	// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	result.dciuppbnd = cic_upper(F00,F01,F10,F11,YS,YS01,at)
+
+	// DONE.  RETURN STRUCTURE W/ FOUR ROW VECTORS.
+	// Each vector has mean estimate in first column, plus one column for each element of "at"
+	return(result)
+}
+
+
+
+// CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
+real vector cic_con(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
+{
+	// this function calculates the continuous outcomes CIC estimator
+	// first estimate the cdf of Y^N_11 using equation (9) in the paper and
+	// then use that to calculate the average effect of the treatment
+	real vector FCO, est_con
+	real scalar i, F01y, F00invF01y, F10F00invF01y
+
+	// for each y in the support of Y01, fill in FCO(y)=F_10(F^-1_00(F_01(y)))
+	FCO=J(length(YS01),1,0)
+	for(i=1; i<=length(YS01); ++i) {
+		F01y=cdf(YS01[i],F01,YS)
+		F00invF01y=cdfinv(F01y,F00,YS)
+		F10F00invF01y=cdf(F00invF01y,F10,YS)
+		FCO[i] = F10F00invF01y
+	}
+	FCO[length(FCO)]=1 // =1 at end
+
+	// mean CIC estimate
+	est_con=( (F11-(0 \ F11[1..(length(YS)-1)]))'*YS - (FCO-(0 \ FCO[1..(length(YS01)-1)]))'*YS01 )
+
+	// quantile CIC estimate
+	for(i=1; i<=length(at); ++i) {
+		est_con = (est_con , ( cdfinv(at[i], F11, YS) - cdfinv(at[i], FCO, YS01) ) )
+	}
+
+	// matrix has mean estimate in first column, plus one column for each element of "at"
+	return(est_con)
+}
+
+
+// CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
+real vector cic_dci(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
+{
+	// this function calculates the discreate outcomes CIC estimator
+	// first estimate the cdf of Y^N_11 using equation (29) in the paper and
+	// then use that to calculate the average effect of the treatment
+	real vector FDCI, FUB, FLB, est_dci
+	real scalar i,F01y,F00invF01y,F10F00invF01y,F00invbF01y,F10F00invbF01y,F00F00invF01y,F00F00invbF01y,FDCI_weight
+
+	// for each y in the support of Y01, fill in FCO(y)=F_10(F^-1_00(F_01(y)))
+	FDCI=FUB=FLB=J(length(YS01),1,0)
+	for(i=1; i<=length(YS01); ++i) {
+		F01y=cdf(YS01[i],F01,YS)
+		F00invF01y=cdfinv(F01y,F00,YS)
+		F10F00invF01y=cdf(F00invF01y,F10,YS)
+		F00invbF01y=cdfinv_brckt(F01y,F00,YS)
+		F10F00invbF01y=cdf(F00invbF01y,F10,YS)
+		F00F00invF01y =cdf(F00invF01y ,F00,YS)
+		F00F00invbF01y=cdf(F00invbF01y,F00,YS)
+		FLB[i]=F10F00invbF01y
+		FUB[i]=F10F00invF01y
+		if ((F00F00invF01y-F00F00invbF01y)>epsilon(1)) FDCI_weight=(F01y-F00F00invbF01y)/(F00F00invF01y-F00F00invbF01y)
+		else                                           FDCI_weight=0
+		FDCI[i]=FLB[i]+(FUB[i]-FLB[i])*FDCI_weight
+	}
+	FDCI[length(FDCI)]=1 // =1 at end
+
+	// conditional independence estimate
+	est_dci=( (F11-(0 \ F11[1..(length(YS)-1)]))'*YS - (FDCI-(0 \ FDCI[1..(length(YS01)-1)]))'*YS01 )
+
+
+	// quantile CIC estimate
+	for(i=1; i<=length(at); ++i) {
+		est_dci = (est_dci , ( cdfinv(at[i], F11, YS) - cdfinv(at[i], FDCI, YS01) ) )
+	}
+
+	// matrix has mean estimate in first column, plus one column for each element of "at"
+	return(est_dci)
+}
+
+
+// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+real vector cic_lower(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
+{
+	// this function calculates the discreate outcomes CIC estimator
+	// first estimate the cdf of Y^N_11 using equation (29) in the paper and
+	// then use that to calculate the average effect of the treatment
+	real vector FLB, est_lower
+	real scalar i,F01y, F00invbF01y,F10F00invbF01y
+
+	// for each y in the support of Y01, fill in FCO(y)=F_10(F^-1_00(F_01(y)))
+	FLB=J(length(YS01),1,0)
+	for(i=1; i<=length(YS01); ++i) {
+		F01y=cdf(YS01[i],F01,YS)
+		F00invbF01y=cdfinv_brckt(F01y,F00,YS)
+		F10F00invbF01y=cdf(F00invbF01y,F10,YS)
+		FLB[i]=F10F00invbF01y;
+	}
+	FLB[length(FLB)]=1 // =1 at end
+
+	// conditional independence estimate
+	est_lower=( (F11-(0 \ F11[1..(length(YS)-1)]))'*YS - (FLB-(0 \ FLB[1..(length(YS01)-1)]))'*YS01 )
+
+	// quantile CIC estimate
+	for(i=1; i<=length(at); ++i) {
+		est_lower = (est_lower , ( cdfinv(at[i], F11, YS) - cdfinv(at[i], FLB, YS01) ) )
+	}
+
+	// matrix has mean estimate in first column, plus one column for each element of "at"
+	return(est_lower)
+}
+
+
+// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+real vector cic_upper(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
+{
+	// this function calculates the discreate outcomes CIC estimator
+	// first estimate the cdf of Y^N_11 using equation (29) in the paper and
+	// then use that to calculate the average effect of the treatment
+	real vector FUB, est_upper
+	real scalar i,F01y,F00invF01y,F10F00invF01y
+
+	// for each y in the support of Y01, fill in FCO(y)=F_10(F^-1_00(F_01(y)))
+	FUB=J(length(YS01),1,0)
+	for(i=1; i<=length(YS01); ++i) {
+		F01y=cdf(YS01[i],F01,YS)
+		F00invF01y=cdfinv(F01y,F00,YS)
+		F10F00invF01y=cdf(F00invF01y,F10,YS)
+		FUB[i]=F10F00invF01y;
+	}
+	FUB[length(FUB)]=1 // =1 at end
+
+	// conditional independence estimate
+	est_upper=( (F11-(0 \ F11[1..(length(YS)-1)]))'*YS - (FUB-(0 \ FUB[1..(length(YS01)-1)]))'*YS01 )
+
+	// quantile CIC estimate
+	for(i=1; i<=length(at); ++i) {
+		est_upper = (est_upper , ( cdfinv(at[i], F11, YS) - cdfinv(at[i], FUB, YS01) ) )
+	}
+
+	// matrix has mean estimate in first column, plus one column for each element of "at"
+	return(est_upper)
+}
+
+// Confirm cic() == cic_seperate()
+struct cic_result scalar result1, result2
+if (args()==6) result1=cic(Y00,Y01,Y10,Y11,at)                 // without weights
+else           result1=cic(Y00,Y01,Y10,Y11,at,W00,W01,W10,W11) // with weights
+
+if (args()==6) result2=cic_seperate(Y00,Y01,Y10,Y11,at)                 // without weights
+else           result2=cic_seperate(Y00,Y01,Y10,Y11,at,W00,W01,W10,W11) // with weights
+
+if (result1==result2) "Elements are equal"
+else {
+	result1.con;result1.dci;result1.dcilowbnd;result1.dciuppbnd;result2.con;result2.dci;result2.dcilowbnd;result2.dciuppbnd
+	_error( "Elements not equal")
+}
+
+end
