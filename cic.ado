@@ -21,7 +21,9 @@ clear all
 *    post_var                 is a dummy that equals 1 for the period in which the treatment group is treated
 *    control_varlist          is a list of control variables (optional)
 *
-*  and options are
+*  and options are as follows:
+*
+*  MAIN
 *    at(numlist)              a list of percentiles for CIC results. default is at(10(10)90)
 *    vce(none|                don't calculate standard errors, the default
 *        delta|               use numerical
@@ -33,7 +35,25 @@ clear all
 *                                    an even better estimate is needed. Generally, replications on the order of 1,000 produce very good
 *                                    estimates, but only 50–200 replications are needed for estimates of standard errors...."
 *    untreated                counterfactual effect of the policy for the untreated group (Setion 3.2 of paper)
-*    regopt(opts)             any other options are passed through to the regression command used to adjust for covariates (assuming there is a control varlist)
+*
+*  REPORTING
+*      level(passthru)              set confidence level; default is level(95)
+*      notable                      suppress table of results
+*      noheader                     suppress table header
+*      nolegend                     suppress table legend
+*      display_options              control spacing and display of omitted variables and base and empty cells
+*								       display_options:  noomitted, vsquish, noemptycells, baselevels, allbaselevels;
+*                                                        see help estimation options##display_options
+*
+*  BSOPTS SUBOPTIONS
+*     reps(#)                      perform # bootstrap replications; default is reps(200)
+*     saving(filename[,replace])   save bootstrap results to filename (optionally, replace specifies that filename be overwritten, if it exists.)
+*     accel(vector)                acceleration values for each statistic
+*     mse                          use MSE formula for variance estimation
+*     nodots                       suppress the replication dots
+*  See [R] bootstrap postestimation for features available after estimation.
+
+
 
 * Weights may be iweights or fweights.  Weights are not allowed with vce(boostrap).
 
@@ -46,33 +66,39 @@ program define cic, eclass byable(recall)
 		[, at(numlist min=1 >=0 <=100 sort) ///
 		Vce(passthru) ///
 		UNTreated ///
-		REGOpt(string) ///
-		]
+		level(passthru) notable NOHeader NOLegend * ] // Reporting options
 	marksample touse
+	 _get_diopts diopts, `options'
+	local diopts `diopts' `table' `header' `legend'
 
 	// first three variables need to be y, treat, and post
 	gettoken y     varlist : varlist
 	gettoken treat varlist : varlist
 	gettoken post  varlist : varlist
+// byable(recall) working right?
 
-	// prep to handle weights
-	if !missing("`weight'") {
-		tempvar wgtvar
-		gen `wgtvar' `exp' if `touse'
-		local wtexp_caller = `", "`wgtvar'" "'
-		summ `wgtvar' if `touse' , meanonly
-		local n=r(sum)
-		qui count if `touse'
-		local n_obs=r(N)
+// _error( "also, switch bootstrap --> fullbootstrap and bspctile as a followup to bstat ")
 // error -- add check non-integer weights allowed with cic bootstrap
 // add documentation that *  fweights, but not iweights, work with vce( ??????????????? )
 // in documentation, talk about why bootstrap: prefix might be needed (longitudinal data, sample by id instead of pre/post groups)
 // vce(????) is equivalent to bootstrap:
+
+// vce(bootstrap, [bsopts]) is equivalent to
+//    . bootstrap _b, strata(treat post) [bsopts]: cic y treat post ... , vce(none)
+// but slower because vce(bootstrap) is implimented in META and runs with less overhead.
+// However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other variables.
+
+	// prep to handle weights
+	if !missing("`weight'") {
+		tempvar wgtvar
+		gen `wgtvar'`exp' if `touse'
+		local wtexp_caller = `", "`wgtvar'" "'
+		summ `wgtvar' if `touse' , meanonly
+		local n=round(r(sum))
 	}
 	else {
 		qui count if `touse'
 		local n=r(N)
-		local n_obs=r(N)
 	}
 
 	// parse percentiles
@@ -81,33 +107,19 @@ program define cic, eclass byable(recall)
 	local at = r(numlist)
 
 	// parse vce()
-	// if vce(bootstrap), run bootstrap iterations with recursive cic call
-	// this section is similar in function to the "_vce_parserun" command, except that I set default values for reps() and strata()
-	if !mi("`vce'")  {
-		cic_vce_parse `treat' `post' [`weight'`exp'], `vce'
-		local vce = r(vce)
-		local usebspctile = r(usebspctile)
-		if ("`vce'"=="bootstrap") {
-			// bootstrap the cic command (no SEs)
-return list
-			bootstrap _b, reps( `=r(reps)' ) `r(bsopts)' : cic `y' `treat' `post' `varlist' if `touse' [`weight'`exp'], at(`at')
-return list
-			if "bspctile"=="`vce'" {
-			  if `=r(reps)' < 1000 nois di as error "Warning: More bootstrap repetitions might be needed with vce(bspctile)."
-			  tempname ci_se
-			  mata : bs_se( "e(ci_percentile)", "`ci_se'" )
-			  ereturn repost V = `ci_se'
-			  ereturn display
-			}
-			exit
-		}
-	}
-	else local vce = "none"
-
-	* adjust y for covariates (OLS regression)
+	if mi(`"`vce'"') local vce vce(none)
+	cic_vce_parse, `vce'
+	local vce     = r(vce)
+	local bsreps  = r(bsreps)
+	local nodots  = r(nodots)
+	local sedelta = r(sedelta)
+	if !missing(r(bsopts)) local bsopts  = r(bsopts)
+	if !missing(r(saving)) local bsopts  = r(saving)
+	
+	// adjust y for covariates (OLS regression)
 	if `: list sizeof varlist'!=0 {
 		di as txt "Regression to adjust `y' for control variables:"
-		regress `y' ib0.`treat'##ib0.`post' `varlist' if `touse' [`weight'`exp'], `regopt'
+		regress `y' ib0.`treat'##ib0.`post' `varlist' if `touse' [`weight'`exp'], `diopts' `level'
 		tempvar yresid yadj
 		qui predict `yresid' if `touse', residuals
 		qui gen `yadj' = `yresid' + _b[_cons] + _b[1.`treat']*`treat' + _b[1.`post']*`post' + _b[1.`treat'#1.`post']*`treat'*`post' if `touse'
@@ -117,40 +129,50 @@ return list
 	else local yadj `y'
 
 	// implement mata CIC routine
+	tempname eresults
 	if "`untreated'"=="" {
 		// default - effect of treatment on the treated
-		mata: cicresult = cic_caller( "`y'", "`treat'", "`post'", "`touse'", "at", "`vce'" `wtexp_caller')
+		mata: cicresult = cic_caller( "`yadj'", "`treat'",     "`post'", "`touse'", "at", `bsreps', `nodots', `sedelta' `wtexp_caller')
+		mat `eresults' = e(results)
 	}
 	else {
-		// option - effect of treatment on the untreated
-		// just switch `treat' variable and use -e(b)
+		// option - effect of treatment on the untreated (just switch `treat' variable and use -e(results))
 		tempvar untreated
-		gen `untreated' = `treat'==0
-		mata: cicresult = cic_caller( "`y'", "`untreated'", "`post'", "`touse'", "at", "`vce'" `wtexp_caller')
-		matrix `cic_estimates' = -`cic_estimates'
+		gen `untreated' = (`treat'==0)
+		mata: cicresult = cic_caller( "`yadj'", "`untreated'", "`post'", "`touse'", "at", `bsreps', `nodots', `sedelta' `wtexp_caller')
+		mat `eresults' = e(results)
+		matrix `eresults' = -`eresults'
 	}
-
-local bsreps=10
 
 	// post results to ereturn
 	if `bsreps' {
+		// option - save bs reps into a specified file (`saving' contains ", replace" if it was provided)
+		if !mi(`"`saving'"') copy `bstempfile' `saving'
+		
 		// post boostrapped estimates with standard errors using bstat
-		bstat  using `bstempfile', stat(e(results)) title(Changes in Changes (CIC))
-ereturn list
-char list
+		bstat  using `bstempfile', stat( `eresults' ) `bsopts' `diopts' `level' title(Changes in Changes (CIC) Estimation)
+
+		if "bspctile"=="`vce'" {
+			if `=r(reps)' < 1000 nois di as error "Warning: More bootstrap repetitions might be needed with vce(bspctile)."
+			tempname ci_se
+			mata : bs_se( "e(ci_percentile)", "`ci_se'" )
+			ereturn repost V = `ci_se'
+			ereturn display
+		}
+
 	}
 	else {
 		// otherwise just use ereturn to get pretty estimates table
-		tempname eresults
-		mat `eresults' = e(results)
-		ereturn post `eresults' [`weight'`exp'], depname("`y'") obs(`n') esample(`touse')
-ereturn list
-char list
+	    di as txt _n "Changes in Changes (CIC) Estimation"
+		ereturn post `eresults' [`weight'`exp'], depname(`y') obs(`n') esample(`touse') dof(`=`n'-colsof(`eresults')') `level'
+		ereturn display
 	}
-	if inlist("`vce'","none","") ereturn local command = "cic"
-	else                         ereturn local cmd = "cic"
-	ereturn local cmdline cic `0'
-	if !missing("`weight'") ereturn scalar n_obs=`n_obs'
+ 	ereturn local cmd = "cic"
+ 	ereturn local cmdline cic `0'
+	if  !missing("`untreated'")  di as txt "(Effect of Treatment on the Treated Group)"
+	else                         di as txt "(Effect of Treatment on the Untreated Group)"
+	if !missing("`untreated'")   ereturn local effecton "Effect of Treatment on the Treated Group"
+	else                         ereturn local effecton "Effect of Treatment on the Untreated Group"
 
 // graph results
 /*
@@ -161,6 +183,8 @@ matrix b = b'
 keep in 1/3
 svmat b, names("b")
 */
+ereturn list
+char list
 
 end // end of cic program definition
 
@@ -168,30 +192,41 @@ end // end of cic program definition
 // subroutine to parse the vce() option
 // this section is similar in function to the "_vce_parse" command, except that I set default values for reps() and strata()
 program define cic_vce_parse, rclass
-	syntax [varlist] [iw fw], vce(string asis)
+	version 11.2
+	syntax , vce(string asis)
 	_parse comma vce 0 : vce
 	if  inlist( "`vce'","bootstra","bootstr","bootst","boots","boot","boo","bo")     local vce "bootstrap"
 	if  inlist( "`vce'","bspctil","bspcti","bspct","bspc","bsp","bsp","bs")          local vce "bspctile"
 	if  inlist( "`vce'","delt","del","de","d")                                       local vce "delta"
 	if  inlist( "`vce'","non","no","n")                                              local vce "none"
-	if !inlist( "`vce'","delta","bootstrap","bspctile","none") {
-		di as error "Only vce(delta), vce(bootstrap [, subopts]), vce(bspctile [, subopts]), and vce(none) allowed."
+
+	if !inlist("`vce'","bootstrap","bspctile") & !mi("`0'") {
+		di as error "suboptions are not allowed with vce(`vce')"
 		error 198
 	}
+
 	return local vce `vce'
 	if inlist("`vce'","bootstrap","bspctile") {
-		local stratvars : copy local varlist
-		syntax [, Reps(integer 1000) strata(string asis) notable *]
-		if mi("`strata'") local strata : copy local stratvars
-		return local  bsopts  strata(`strata') `=cond("bspctile"=="`vce'","notable","`table'")' `options'
-		return scalar reps  = `reps'
-		if !missing("`weight'") {
-			di as error "Weights not allowed with vce(bootstrap)"
-			error 198
-		}
+		syntax [, Reps(integer 200) saving(string asis) NODots *]
+		return scalar bsreps  = `reps'
+		return scalar nodots  = ( "nodots"=="`dots'" )
+		return scalar sedelta = 0
+		return local  saving  : copy local saving
+		return local  bsopts  : copy local options
 	}
-	else if !mi("`0'") {
-		di as error "suboptions are not allowed with vce(`vce')"
+	else if ("`vce'"=="delta") {
+		return scalar bsreps  = 0
+		return scalar nodots  = 0
+		return scalar sedelta = 1
+
+	}
+	else if ("`vce'"=="none") {
+		return scalar bsreps  = 0
+		return scalar nodots  = 0
+		return scalar sedelta = 0
+	}
+	else {
+		di as error "Only vce(delta), vce(bootstrap [, subopts]), vce(bspctile [, subopts]), and vce(none) allowed."
 		error 198
 	}
 end
@@ -218,13 +253,15 @@ struct cic_result {
 
 
 // CIC CALLER -- THIS FUNCTION READS STATA DATA INTO MATA AND CALLS THE MAIN CIC ROUTINE
-struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var, string scalar post_var, string scalar touse_var, string scalar at_local, string scalar vce, |string scalar wgt_var)
+struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var, string scalar post_var, string scalar touse_var, string scalar at_local, real scalar bsreps, real scalar nodots, real scalar sedelta, |string scalar wgt_var)
 {
 	// Inputs:
 	//   1-4. Names of variables `y', `treat', `post', and `touse'
 	//   5.   Name of local macro containing quantiles of interest, ranging from 0 to 100 (`at')
-	//   6.   VCE estimation type (`vce')
-	//   7.   (Optional) Name of variable with fweight or iweight
+	//   6.   Number of bootstrap reps (=0 to skip)
+	//   7.   Do not show bootstrapping dots (=1 to suppress dots)
+	//   8.   Standard error for conditional independence based on numerical differentiation (=0 to skip)
+	//   9.   (Optional) Name of variable with fweight or iweight
 	// Output: Structure with four vectors. Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
 
 	// Get data into mata
@@ -247,7 +284,7 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 	if (min((length(Y00),length(Y01),length(Y10),length(Y11)))==0) _error( "One or more of the four treat*post groups is empty." )
 
 	// Select the rows of wgt belonging to the treat*post groups
-	if (args()==7) {
+	if (args()==9) {
 		real colvector wgt, W00, W01, W10, W11
 		st_view(wgt=.,.,wgt_var,touse_var)
 		st_select(W00=.,wgt,(treat:==0 :& post:==0))
@@ -260,76 +297,74 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 	struct cic_result scalar result
 
 	// Call the main CIC routine
-	if (args()==6) result=cic(Y00,Y01,Y10,Y11,at)                 // without weights
+	if (args()==8) result=cic(Y00,Y01,Y10,Y11,at)                 // without weights
 	else           result=cic(Y00,Y01,Y10,Y11,at,W00,W01,W10,W11) // with weights
 
 	// Return results into a Stata matrix too
 	string matrix colfulllabels
 	st_matrix("e(at)",(result.at))
 	st_matrix("e(results)", (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+
 	// Label the columns of the matrix
 	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("p":+strofreal(at*100))))'))
 	st_matrixcolstripe("e(results)", colfulllabels)
 	st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
 	st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
 	st_numscalar( "e(N_strata)", 4)
-	st_numscalar( "e(N)"       , rows(y))
+	if (args()==8) st_numscalar( "e(N)"       , rows(y))
+	else           st_numscalar( "e(N)"       , round(sum(wgt)))
+	st_numscalar( "e(N00)"     , rows(Y00))
+	st_numscalar( "e(N01)"     , rows(Y01))
+	st_numscalar( "e(N10)"     , rows(Y10))
+	st_numscalar( "e(N11)"     , rows(Y11))
 
-real scalar bsreps, nodots
-bsreps=20
-nodots = 0
-_error( "need to pass bsreps and nodots as arguements.")
-_error( "also, switch bootstrap --> fullbootstrap and bspctile as a followup to bstat ")
-
-	if (bsreps) {
+	// Bootstrapping
+	if (bsreps & sedelta) _error( "bsreps and sedelta not allowed at the same time.")
+	else if (bsreps) {
 		real scalar b
 		struct cic_result scalar bs_loop
 		real matrix bsdata
 		bsdata=J(bsreps,4*(1+length(at)),.)
 
 		// header for dots
-		if (nodots==0) {
+		if (!nodots) {
 			printf( "{txt}\nBootstrap replications ({res}%g{txt})\n", bsreps)
 			display( "{txt}{hline 4}{c +}{hline 3} 1 " +
 				"{hline 3}{c +}{hline 3} 2 " + "{hline 3}{c +}{hline 3} 3 " +
 				"{hline 3}{c +}{hline 3} 4 " + "{hline 3}{c +}{hline 3} 5 ")
 		}
 
-		if ((args()==4) & (round(wgt)!=wgt)) _error( "Mata bootstrapping does not work with non-integer weights." )
+		if ((args()==8) & (round(wgt)!=wgt)) _error( "CIC bootstrapping does not work with iweights." )
 
 		for(b=1; b<=bsreps; ++b) {
-			if (args()==6) bs_loop=cic(drawsmpl(Y00),drawsmpl(Y01),drawsmpl(Y10),drawsmpl(Y11),at)                 // without weights
+			if (args()==8) bs_loop=cic(drawsmpl(Y00),drawsmpl(Y01),drawsmpl(Y10),drawsmpl(Y11),at)                 // without weights
 			else           bs_loop=cic(drawsmpl(Y00,W00),drawsmpl(Y01,W01),drawsmpl(Y10,W10),drawsmpl(Y11,W11),at) // with frequency weights
 
 			// save into return structure
 			bsdata[b,.]  =(bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd)
 
 			// show dots
-			if (missing((bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd))) {
-				if (nodots==0) printf( "{err}x{txt}")
-			}
-			else if (nodots==0) printf( ".")
-			if (nodots==0) {
-				if (mod(b,50)==0) printf( " %5.0f\n",b)
+			if (!nodots) {
+				if (missing((bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd))) printf( "{err}x{txt}")
+				else printf( ".")
+				if (!mod(b,50)) printf( " %5.0f\n",b)
 				displayflush()
 			}
-
 		} // end loop through bs iterations
-		if (nodots==0 & mod(b-1,50)) display("")
+		if (!nodots & mod(b-1,50)) display("")
 
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
 		  string rowvector bstempfile, bstempvars
-
 		  // clear data (after preserve) and fill with bsdata matrix
 		  st_dropvar(.)
 		  st_addobs(rows(bsdata))
-		  bstempvars=strtoname("v":+strofreal(1::cols(bsdata)))'
+		  bstempvars=strtoname("est":+strofreal(1::cols(bsdata)))'
 		  st_store(.,st_addvar("double",bstempvars), bsdata)
-
 		  // setup file for bstat command
 		  st_global( "_dta[bs_version]" , "3")
-		  st_global( "_dta[N]"          , strofreal(rows(y)))
+		  if (args()==8) st_global( "_dta[N]", strofreal(rows(y)))
+		  else           st_global( "_dta[N]", strofreal(round(sum(wgt))))
 		  st_global( "_dta[N_strata]"   , "4")
 		  st_global( "_dta[strata]"     , (treat_var + " " + post_var))
 		  st_global( "_dta[command]"    , "cic")
@@ -337,19 +372,23 @@ _error( "also, switch bootstrap --> fullbootstrap and bspctile as a followup to 
 			 st_global( (bstempvars[1,b]+"[colname]"), colfulllabels[b,2])
 			 st_global( (bstempvars[1,b]+"[coleq]")  , colfulllabels[b,1])
 		  }
-
 		  // save as `bstempfile'
 		  bstempfile=st_tempfilename()
 		  st_local( "bstempfile",bstempfile)
 		  stata(( "qui save " + bstempfile ))
 		stata( "restore" )
 	} // done bootstrapping
-
+	else if (sedelta) {
+_error( "Code for sedelta=0 not written." )
+	}
+	
 
 	// DONE.  Pass results back to caller
 	return(result)
 }
 
+
+// >>>>>>>>>>  check that column names and such are the same as the ouput in the example in the NOTE (below)
 
 // CIC ROUTINE
 struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvector Y10, real colvector Y11, real rowvector at, | real colvector W00, real colvector W01, real colvector W10, real colvector W11 )
@@ -622,19 +661,19 @@ cd "C:\Users\keith\Desktop\CIC\"
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 cic_vce_parse, vce(boot, reps(1000) saving(myfile.dta, replace))
 return list
-cic_vce_parse, vce(boot, reps(25) strata(x y) cluster(treat))
+cap nois cic_vce_parse, vce(none, reps(25))
 return list
-cic_vce_parse, vce(boot, reps(25) strata() cluster())
+cic_vce_parse, vce(bspctile, reps(25) mse accel(myvector) saving("c:\temp\test.dta", replace))
 return list
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-set tracedepth 2
+set tracedepth 1
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 1000
-if 0     	local vce vce(bootstrap, reps(`Nreps'))
+local Nreps = 50
+if 0   	local vce vce(bootstrap, reps(`Nreps'))
 else if 0	local vce vce(bspctile , reps(`Nreps'))
 else       	local vce " "
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -696,11 +735,10 @@ reg ly high##after
 // CIC estimates from A&I Appendix
 // Table 2
 timer on 2
-cic  y high after ,  at(25 50 75 90) `vce'
+cic  y high after ,  at(25 50 75 90) `vce' 
 cic ly high after ,  at(50)          `vce'
 timer off 2
 timer list 2
-exit
 
 // Table 3
 timer on 3
@@ -711,9 +749,22 @@ timer list 3
 
 log close
 
-exit
 // compare vce() option above to the bootstrap prefix
-bootstrap , reps(`Nreps') strata(high after) : cic y  high after ,  at(25 50 75 90)
+timer on 10
+cic y high after, vce(bootstrap, reps(`Nreps'))
+timer off 10
+timer list 10
+est store X11
+estat bootstrap , all // estat bootstrap does work
+
+set trace on
+estimates replay X11
+exit
+timer on 12
+bootstrap , reps(`Nreps') strata(high after) : cic y high after
+timer off 12
+timer list 12
+
 
 // check weights are working
 gen testweight =(uniform()<.95) + (uniform()<.20)
