@@ -99,6 +99,13 @@ program define Estimate, eclass byable(recall)
 // but slower because vce(bootstrap) is implimented in META and runs with less overhead.
 // However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other variables.
 
+
+// nodots not working? 
+
+
+// if control varaibles and bootstrap, produce an error.
+
+
 	// prep to handle weights
 	if !missing("`weight'") {
 		tempvar wgtvar
@@ -196,9 +203,6 @@ program define Estimate, eclass byable(recall)
 	di as txt "(" e(footnote) ")"
 end // end of cic program definition
 
-
-
-
 // subroutine to replay estimates
 // this section is similar in function to the "_vce_parse" command, except that I set default values for reps() and strata()
 program Replay
@@ -250,7 +254,6 @@ program define cic_vce_parse, rclass
 		error 198
 	}
 end
-
 
 
 /* * * * *  BEGIN MATA BLOCK * * * * */
@@ -682,6 +685,95 @@ end
 /* * * * *  END OF MATA BLOCK * * * * */
 
 
+
+
+program define cicgraph, sortpreserve
+
+	syntax [, ///
+		Ci(name) /// {normal | percentile | bc | bca} ///
+		Equations(namelist) /// {continuous, discrete_ci, dci_lower_bnd, and/or dci_upper_bnd}
+		Name(name) /// graph names; if >1  name in equations(), names get .  graphs in memory will be replaced.
+		*]
+
+	if ("`e(cmd)'"!="cic") | (lower(e(vcetype))!="bootstrap") error 301
+	
+	// cic option
+	if mi("`ci'") local ci normal // ci_normal by default
+	else if !inlist("`ci'","normal","percentile","bc","bca") {
+		di as err "ci() must be normal, percentile, bc, bca, or otherwise available in a conforming matrix named e(ci_`ci')"
+		error 198
+	}
+
+	// pull coefficients and CI
+	tempname b int
+	tempvar coef eqn p pctile mean meanll meanul meanaxis 
+	matrix `b'  = e(b)
+	matrix `b'  = `b''
+
+	matrix `int' =  e(ci_`ci')
+	matrix `int' = `int''
+	local level =  e(level)
+
+	svmat `b' , names("`coef'")
+	svmat `int',
+
+	local rows = rowsof(`b')
+	if (c(N) < `rows') set obs `rows'
+
+	local names : rownames `b'
+	local eqns  : roweq `b'
+
+	qui {
+		gen `eqn' = ""
+		gen `p' = ""
+		gen `pctile' = .
+		forvalues i = 1/`rows' {
+			local thiseqn  : word `i' of `eqns'
+			local thisname : word `i' of `names'
+			replace `eqn' = "`thiseqn'"  in `i'
+			replace `p'   = "`thisname'" in `i'
+			if regexm("`thisname'","^p([0-9]*)_?([0-9]*)") replace `pctile' = real(regexs(1)+"."+regexs(2)) in `i'
+		}
+
+		bys `eqn' (`p'): gen `mean'     = `coef'[1]
+		by  `eqn'      : gen `meanll'   = `int'1[1]
+		by  `eqn'      : gen `meanul'   = `int'2[1]
+		gen     `meanaxis' = 0 
+		replace `meanaxis' = 100 if `p'!="mean" 
+	}
+
+	list `eqn' `p' `pctile' `coef' `int'1 `int'2 `mean' `meanll' `meanul' `meanaxis' if !mi(`coef'), sepby(`eqn')
+
+	// graph results
+	if mi("`equations'") local equations "continuous" 
+	local c=1 
+	foreach eqnname of local equations {		
+		if      "`eqnname'"=="continuous"    local eqnlabel "CIC model with continuous outcomes"
+		else if "`eqnname'"=="discrete_ci"   local eqnlabel "CIC model with discrete outcomes"
+		else if "`eqnname'"=="dci_lower_bnd" local eqnlabel "Discrete CIC model lower bound"
+		else if "`eqnname'"=="dci_upper_bnd" local eqnlabel "Discrete CIC model upper bound"
+		else {
+			di as error "eqnname() should be continuous, discrete_ci, dci_lower_bnd, dci_upper_bnd"
+			error 198
+		}
+		
+
+		graph twoway ///
+			(scatter `mean'        `meanaxis', sort pstyle(p2) connect(L) msymbol(none) lwidth(*1.25)) ///
+			(scatter `meanll'      `meanaxis', sort pstyle(p2) connect(L) msymbol(none) lwidth(*.85)  lpattern(dash)) ///
+			(scatter `meanul'      `meanaxis', sort pstyle(p2) connect(L) msymbol(none) lwidth(*.85)  lpattern(dash)) ///
+			(rcap    `int'1 `int'2 `pctile',   sort pstyle(p1) lcolor(*.85) lwidth(*.85)) ///
+			(scatter `coef'        `pctile',   sort pstyle(p1) msize(*1.15) connect(L)) ///
+				if `eqn'=="`eqnname'", ///
+				legend(order(5 1 4 2) label(5 "Quantiles") label(4 "Quantiles `level'% CI") ///
+					   cols(2)        label(1 "Mean")      label(2 "Mean `level'% CI")) ///
+				xtitle( "Quantile" ) ytitle("") title( "`eqnlabel'") subtitle( "`=e(footnote)'" ) ///
+				name(`name'`=cond(`c'>1,"`c'","")',replace) `options'
+		local ++c
+	}
+
+end // end of cic program definition
+
 cd "C:\Users\keith\Desktop\CIC\"
 
 
@@ -701,7 +793,7 @@ set tracedepth 3
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 25
+local Nreps = 1000
 if 01     	local vce vce(bootstrap, reps(`Nreps'))
 else if 0	local vce vce(bspctile , reps(`Nreps'))
 else       	local vce " "
@@ -761,11 +853,9 @@ tabstat y ly , by(high_after) s(count mean sd min p25 p50 p75 p90 max) columns(s
 reg y high##after
 reg ly high##after
 
-cic  ly high after ,  at(5(2.67)95) `vce'
+cic  ly high after ,  at(5(10)95) `vce'
 ereturn list
-* set trace on
-cicgraph
-exit
+*set trace on
 
 // CIC estimates from A&I Appendix
 // Table 2
@@ -775,6 +865,7 @@ cic ly high after ,  at(50)          `vce'
 timer off 2
 timer list 2
 
+
 // Table 3
 timer on 3
 cic  y high after ,  at(25 50 75 90) `vce' untreated
@@ -783,6 +874,11 @@ timer off 3
 timer list 3
 
 log close
+
+
+// graphs 
+cic  y high after ,  at(1 5(2.5)90) `vce'
+cicgraph,  name(g) e(continuous discrete_ci dci_lower_bnd dci_upper_bnd)
 
 // compare vce() option above to the bootstrap prefix
 
@@ -805,7 +901,6 @@ cap nois bootstrap [continuous]_b[mean], reps(20) strata(high after) : cic y hig
 
 // test jacknife
 jacknife: cic y high after if uniform()<.1
-exit
 
 // check weights are working
 gen testweight =(uniform()<.95) + (uniform()<.20)
@@ -835,7 +930,7 @@ cap nois cic  y high after ,  at(25 50 75 90) vce(delta)
 
 
 ereturn list
-exit
+
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -851,35 +946,6 @@ replace wage = wage - POST1
 // bootstrap the sample conditional on Ngt for g; t = 0; 1
 cic wage TREAT1 POST1 i.occupation,  at(10(10)90 99.5)
 
-
-
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-* The following code can be used to test the program using "fake" data
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-clear
-set obs 4
-gen post  = inlist(_n,1,3)
-gen treat = inlist(_n,1,2)
-local n_g=1000
-expand `n_g'
-bys p t: gen y = _n / `n_g'
-gen     d = 1.75 - 1.5 * y if t==0 & p==0
-replace d = 0.75 - 0.5 * y if t==0 & p==1
-replace d = 0.80 - 0.4 * y if t==1 & p==0
-replace d = 0.50 - 1.0 * y if t==1 & p==1
-
-cic y treat post,  at(10(10)90)
-
-replace y = ceil(y*10)/10
-tab y
-cic y treat post,  at(10(10)90)
-
-replace y = ceil(y/50)*50
-tab y
-cic y treat post,  at(10(10)90)
-
-
-exit
 
 
 
