@@ -1,11 +1,11 @@
 clear all
 
-*! $Id$
+*! *! version $Id$
 *! Changes-in-changes
 *!
 *! An implimentation of:
 *! Athey, S. & G. W. Imbens. "Identification and Inference in Nonlinear Difference-in-Differences Models."
-*!    	Econometrica, 74 (2), March 2006, pp. 431-497.
+*!     Econometrica, 74 (2), March 2006, pp. 431-497.
 *!
 *! Stata code by Keith Kranker
 *! Based on Matlab code by S. Athey & G. W. Imbens, published on S. Athey's website
@@ -28,12 +28,6 @@ clear all
 *    vce(none|                don't calculate standard errors, the default
 *        delta|               use numerical
 *        bootstrap[, bsopts]| use bootstrap (by default, 1000 reps stratified by treat/post) other options allowed
-*        bspctile[, bsopts])  use Athey and Imben's of obtaining bootstrap standard errors ( se = (p(97.5) - p(2.5)) / (2*1.96) where p(N) is Nth percentile of bootstrap iterations
-*                                 instead of using Stata's default method. The Stata manual ([R] bootstrap) addresses this issue.
-*                                    "A better estimate is needed if you want to use the 2.5th and 97.5th percentiles of the distribution
-*                                    to produce a 95% confidence interval. To extract many features simultaneously about the distribution,
-*                                    an even better estimate is needed. Generally, replications on the order of 1,000 produce very good
-*                                    estimates, but only 50–200 replications are needed for estimates of standard errors...."
 *    untreated                counterfactual effect of the policy for the untreated group (Setion 3.2 of paper)
 *
 *  REPORTING
@@ -42,12 +36,15 @@ clear all
 *      noheader                     suppress table header
 *      nolegend                     suppress table legend
 *      display_options              control spacing and display of omitted variables and base and empty cells
-*								       display_options:  noomitted, vsquish, noemptycells, baselevels, allbaselevels;
+*                                      display_options:  noomitted, vsquish, noemptycells, baselevels, allbaselevels;
 *                                                        see help estimation options##display_options
 *
 *  BSOPTS SUBOPTIONS
 *     reps(#)                      perform # bootstrap replications; default is reps(200)
 *     saving(filename[,replace])   save bootstrap results to filename (optionally, replace specifies that filename be overwritten, if it exists.)
+*     sepercentile                 obtain bootstrap standard errors from percentiles of bootstrap estimates instead of using Stata's default method.
+*                                      standard error = (p(97.5) - p(2.5)) / (2*1.96), where p(N) is Nth percentile of bootstrap iterations.
+*                                      this is the method used in Athey and Imbens' MATLAB code.
 *     accel(vector)                acceleration values for each statistic
 *     mse                          use MSE formula for variance estimation
 *     nodots                       suppress the replication dots
@@ -57,9 +54,23 @@ clear all
 
 * Weights may be iweights or fweights.  Weights are not allowed with vce(boostrap).
 
-program define cic, eclass byable(recall)
+program cic, properties(mi) eclass byable(onecall)
 	version 11.2
-	ereturn clear
+	if replay() {
+		if ("`e(cmd)'"!="cic") error 301
+		if _by()               error 190
+		else Replay `0'
+		exit
+	}
+	if _by() local BY `"by `_byvars'`_byrc0':"'
+	`BY' Estimate `0'
+	ereturn local cmdline `"cic `0'"'
+end
+
+//"
+
+program define Estimate, eclass byable(recall)
+	version 11.2
 
 	// parse arguments
 	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fw iw]  ///
@@ -68,7 +79,7 @@ program define cic, eclass byable(recall)
 		UNTreated ///
 		level(passthru) notable NOHeader NOLegend * ] // Reporting options
 	marksample touse
-	 _get_diopts diopts, `options'
+	_get_diopts diopts, `options'
 	local diopts `diopts' `table' `header' `legend'
 
 	// first three variables need to be y, treat, and post
@@ -111,11 +122,12 @@ program define cic, eclass byable(recall)
 	cic_vce_parse, `vce'
 	local vce     = r(vce)
 	local bsreps  = r(bsreps)
-	local nodots  = r(nodots)
+	local dots    = r(dots)
 	local sedelta = r(sedelta)
-	if !missing(r(bsopts)) local bsopts  = r(bsopts)
-	if !missing(r(saving)) local bsopts  = r(saving)
-	
+	if !missing(r(bsopts))       local bsopts       = r(bsopts)
+	if !missing(r(saving))       local saving       = r(saving)
+	local sepercentile = (r(sepercentile)==1)
+
 	// adjust y for covariates (OLS regression)
 	if `: list sizeof varlist'!=0 {
 		di as txt "Regression to adjust `y' for control variables:"
@@ -127,19 +139,20 @@ program define cic, eclass byable(recall)
 		label var `yadj' "`y' adjusted for covariates"
 	}
 	else local yadj `y'
+	ereturn clear
 
 	// implement mata CIC routine
 	tempname eresults
 	if "`untreated'"=="" {
 		// default - effect of treatment on the treated
-		mata: cicresult = cic_caller( "`yadj'", "`treat'",     "`post'", "`touse'", "at", `bsreps', `nodots', `sedelta' `wtexp_caller')
+		qui mata: cic_caller( "`yadj'", "`treat'",     "`post'", "`touse'", "at", `bsreps', `dots', `sedelta' `wtexp_caller')
 		mat `eresults' = e(results)
 	}
 	else {
 		// option - effect of treatment on the untreated (just switch `treat' variable and use -e(results))
 		tempvar untreated
 		gen `untreated' = (`treat'==0)
-		mata: cicresult = cic_caller( "`yadj'", "`untreated'", "`post'", "`touse'", "at", `bsreps', `nodots', `sedelta' `wtexp_caller')
+		qui mata: cic_caller( "`yadj'", "`untreated'", "`post'", "`touse'", "at", `bsreps', `dots', `sedelta' `wtexp_caller')
 		mat `eresults' = e(results)
 		matrix `eresults' = -`eresults'
 	}
@@ -148,18 +161,23 @@ program define cic, eclass byable(recall)
 	if `bsreps' {
 		// option - save bs reps into a specified file (`saving' contains ", replace" if it was provided)
 		if !mi(`"`saving'"') copy `bstempfile' `saving'
-		
+
 		// post boostrapped estimates with standard errors using bstat
+		`=cond(`sepercentile',"quietly","")' /// quietly if need to call sepercentile
 		bstat  using `bstempfile', stat( `eresults' ) `bsopts' `diopts' `level' title(Changes in Changes (CIC) Estimation)
 
-		if "bspctile"=="`vce'" {
-			if `=r(reps)' < 1000 nois di as error "Warning: More bootstrap repetitions might be needed with vce(bspctile)."
+		if ( `sepercentile' ) {
+			if (e(level)!=95) {
+				ereturn display
+				di as error "-sepercentile- sub-option only works with level(95).  Standard errors displayed above are from Stata's default method of producing standard errors."
+				error 198
+			}
+			if `bsreps' < 1000 nois di as error "Warning: More bootstrap repetitions might be needed with the -sepercentile- bootstrapping sub-option.."
 			tempname ci_se
 			mata : bs_se( "e(ci_percentile)", "`ci_se'" )
 			ereturn repost V = `ci_se'
 			ereturn display
 		}
-
 	}
 	else {
 		// otherwise just use ereturn to get pretty estimates table
@@ -167,27 +185,29 @@ program define cic, eclass byable(recall)
 		ereturn post `eresults' [`weight'`exp'], depname(`y') obs(`n') esample(`touse') dof(`=`n'-colsof(`eresults')') `level'
 		ereturn display
 	}
- 	ereturn local cmd = "cic"
- 	ereturn local cmdline cic `0'
-	if  !missing("`untreated'")  di as txt "(Effect of Treatment on the Treated Group)"
-	else                         di as txt "(Effect of Treatment on the Untreated Group)"
-	if !missing("`untreated'")   ereturn local effecton "Effect of Treatment on the Treated Group"
-	else                         ereturn local effecton "Effect of Treatment on the Untreated Group"
-
-// graph results
-/*
-getmata
-
-matrix b = e(b)
-matrix b = b'
-keep in 1/3
-svmat b, names("b")
-*/
-ereturn list
-char list
-
+ 	ereturn local cmd     "cic"
+ 	ereturn local cmdline `"cic `0'"'
+ 	ereturn local vce     "`vce'"
+	ereturn local title   "Changes in Changes (CIC) Estimation)"
+ 	ereturn scalar k_eq =  4
+ 	ereturn local  eqnames "continuous discrete_ci dci_lower_bnd dci_upper_bnd"
+	if !missing("`untreated'")   ereturn local footnote "Effect of Treatment on the Treated Group"
+	else                         ereturn local footnote "Effect of Treatment on the Untreated Group"
+	di as txt "(" e(footnote) ")"
 end // end of cic program definition
 
+
+
+
+// subroutine to replay estimates
+// this section is similar in function to the "_vce_parse" command, except that I set default values for reps() and strata()
+program Replay
+	syntax [, notable noHeader  noRULES OR GROUPED *]
+	_get_diopts diopts, `options'
+	local diopts `diopts' `table' `header' `legend'
+	_prefix_display, `diopts' `table' `header' `legend'
+	di as txt "(" e(footnote) ")"
+end
 
 // subroutine to parse the vce() option
 // this section is similar in function to the "_vce_parse" command, except that I set default values for reps() and strata()
@@ -196,40 +216,41 @@ program define cic_vce_parse, rclass
 	syntax , vce(string asis)
 	_parse comma vce 0 : vce
 	if  inlist( "`vce'","bootstra","bootstr","bootst","boots","boot","boo","bo")     local vce "bootstrap"
-	if  inlist( "`vce'","bspctil","bspcti","bspct","bspc","bsp","bsp","bs")          local vce "bspctile"
 	if  inlist( "`vce'","delt","del","de","d")                                       local vce "delta"
 	if  inlist( "`vce'","non","no","n")                                              local vce "none"
 
-	if !inlist("`vce'","bootstrap","bspctile") & !mi("`0'") {
+	if ("`vce'"!="bootstrap") & !mi("`0'") {
 		di as error "suboptions are not allowed with vce(`vce')"
 		error 198
 	}
 
 	return local vce `vce'
-	if inlist("`vce'","bootstrap","bspctile") {
-		syntax [, Reps(integer 200) saving(string asis) NODots *]
+	if ("`vce'"=="bootstrap") {
+		syntax [, Reps(integer 200) SAving(string asis) NODots SEPercentile *]
 		return scalar bsreps  = `reps'
-		return scalar nodots  = ( "nodots"=="`dots'" )
+		return scalar dots  = ( "nodots"!="`dots'" )
+		return scalar sepercentile = ( "sepercentile"=="`sepercentile'" )
 		return scalar sedelta = 0
 		return local  saving  : copy local saving
 		return local  bsopts  : copy local options
 	}
 	else if ("`vce'"=="delta") {
 		return scalar bsreps  = 0
-		return scalar nodots  = 0
+		return scalar dots    = 0
 		return scalar sedelta = 1
 
 	}
 	else if ("`vce'"=="none") {
 		return scalar bsreps  = 0
-		return scalar nodots  = 0
+		return scalar dots    = 0
 		return scalar sedelta = 0
 	}
 	else {
-		di as error "Only vce(delta), vce(bootstrap [, subopts]), vce(bspctile [, subopts]), and vce(none) allowed."
+		di as error "Only vce(delta), vce(bootstrap [, subopts]), and vce(none) allowed."
 		error 198
 	}
 end
+
 
 
 /* * * * *  BEGIN MATA BLOCK * * * * */
@@ -253,14 +274,14 @@ struct cic_result {
 
 
 // CIC CALLER -- THIS FUNCTION READS STATA DATA INTO MATA AND CALLS THE MAIN CIC ROUTINE
-struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var, string scalar post_var, string scalar touse_var, string scalar at_local, real scalar bsreps, real scalar nodots, real scalar sedelta, |string scalar wgt_var)
+struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var, string scalar post_var, string scalar touse_var, string scalar at_local, real scalar bsreps, real scalar dots, real scalar sedelta, |string scalar wgt_var)
 {
 	// Inputs:
 	//   1-4. Names of variables `y', `treat', `post', and `touse'
 	//   5.   Name of local macro containing quantiles of interest, ranging from 0 to 100 (`at')
-	//   6.   Number of bootstrap reps (=0 to skip)
-	//   7.   Do not show bootstrapping dots (=1 to suppress dots)
-	//   8.   Standard error for conditional independence based on numerical differentiation (=0 to skip)
+	//   6.   Number of bootstrap reps (=0 for no bootstrapping skip)
+	//   7.   0/1 to show bootstrapping dots (=0 to show dots)
+	//   8.   0/1 for standard error for conditional independence based on numerical differentiation (=0 to skip)
 	//   9.   (Optional) Name of variable with fweight or iweight
 	// Output: Structure with four vectors. Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
 
@@ -327,7 +348,7 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 		bsdata=J(bsreps,4*(1+length(at)),.)
 
 		// header for dots
-		if (!nodots) {
+		if (dots) {
 			printf( "{txt}\nBootstrap replications ({res}%g{txt})\n", bsreps)
 			display( "{txt}{hline 4}{c +}{hline 3} 1 " +
 				"{hline 3}{c +}{hline 3} 2 " + "{hline 3}{c +}{hline 3} 3 " +
@@ -344,14 +365,14 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 			bsdata[b,.]  =(bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd)
 
 			// show dots
-			if (!nodots) {
+			if (dots) {
 				if (missing((bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd))) printf( "{err}x{txt}")
 				else printf( ".")
 				if (!mod(b,50)) printf( " %5.0f\n",b)
 				displayflush()
 			}
 		} // end loop through bs iterations
-		if (!nodots & mod(b-1,50)) display("")
+		if (dots & mod(b-1,50)) display("")
 
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
@@ -359,7 +380,7 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 		  // clear data (after preserve) and fill with bsdata matrix
 		  st_dropvar(.)
 		  st_addobs(rows(bsdata))
-		  bstempvars=strtoname("est":+strofreal(1::cols(bsdata)))'
+		  bstempvars=strtoname("_bs_":+strofreal(1::cols(bsdata)))'
 		  st_store(.,st_addvar("double",bstempvars), bsdata)
 		  // setup file for bstat command
 		  st_global( "_dta[bs_version]" , "3")
@@ -368,9 +389,14 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 		  st_global( "_dta[N_strata]"   , "4")
 		  st_global( "_dta[strata]"     , (treat_var + " " + post_var))
 		  st_global( "_dta[command]"    , "cic")
+		  st_global( "_dta[k_eq]"       , "4")
+		  st_global( "_dta[k_extra]"    , "0")
 		  for(b=1; b<=cols(bsdata); ++b) {
-			 st_global( (bstempvars[1,b]+"[colname]"), colfulllabels[b,2])
-			 st_global( (bstempvars[1,b]+"[coleq]")  , colfulllabels[b,1])
+			 st_global( (bstempvars[1,b]+"[observed]")  , strofreal((result.con,result.dci,result.dcilowbnd,result.dciuppbnd)[1,b]))
+			 st_global( (bstempvars[1,b]+"[expression]"), ( "["+colfulllabels[b,1]+"]_b["+colfulllabels[b,2]+"]"))
+			 st_global( (bstempvars[1,b]+"[coleq]")     , colfulllabels[b,1])
+			 st_global( (bstempvars[1,b]+"[colname]")   , colfulllabels[b,2])
+			 st_global( (bstempvars[1,b]+"[is_eexp]")   , "1" )
 		  }
 		  // save as `bstempfile'
 		  bstempfile=st_tempfilename()
@@ -381,7 +407,7 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 	else if (sedelta) {
 _error( "Code for sedelta=0 not written." )
 	}
-	
+
 
 	// DONE.  Pass results back to caller
 	return(result)
@@ -406,8 +432,8 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	//   Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
 	//   (1) result.con       = CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
 	//   (2) result.dci       = CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
-	//   (3) result.dcilowbnd = LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
-	//   (4) result.dciuppbnd = UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	//   (3) result.dcilowbnd = DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
+	//   (4) result.dciuppbnd = DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
 
 	// The code in cic() is somewhat convoluted because I am
 	// calculating all four vectors simultaneously.
@@ -493,7 +519,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	}
 
 
-	// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	// DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
 	// calculate the discreate outcomes CIC estimator
 	// conditional independence estimate
 	result.dcilowbnd =( (F11-(0 \ F11[1..(length(YS)-1)]))'*YS - (FLB-(0 \ FLB[1..(length(YS01)-1)]))'*YS01 )
@@ -503,7 +529,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	}
 
 
-	// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	// DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
 	// calculate the discreate outcomes CIC estimator
 	// matrix has mean estimate in first column, plus one column for each element of "at"
 	// conditional independence estimate
@@ -604,6 +630,9 @@ real colvector drawsmpl(real colvector x, |real colvector wgt)
 // FOR BOOTSTRAPPING, USE 95 PERCENTILES OF BOOTSTRAP ITERATIONS TO BACKOUT STANDARD ERRORS
 void bs_se( string scalar in_ci, string scalar out_V )
 {
+	// Inputs: 1. Vector with
+	//         2. Stata matrix name for output
+	// Output: Stata matrix with square of standard errors on diagonal, zero' off diagonal
 	real vector bs_se
 	bs_se = (1 /(2 * 1.96)) * (st_matrix(in_ci)[2,.] - st_matrix(in_ci)[1,.])
 	st_matrix(out_V,diag(bs_se:*bs_se))
@@ -659,21 +688,21 @@ cd "C:\Users\keith\Desktop\CIC\"
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 * test cic_vce_parse
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-cic_vce_parse, vce(boot, reps(1000) saving(myfile.dta, replace))
+cic_vce_parse, vce(boot, reps(1000) saving(myfile.dta, replace) sepercent)
 return list
 cap nois cic_vce_parse, vce(none, reps(25))
 return list
-cic_vce_parse, vce(bspctile, reps(25) mse accel(myvector) saving("c:\temp\test.dta", replace))
+cic_vce_parse, vce(boot, reps(25) mse accel(myvector) saving("c:\temp\test.dta", replace))
 return list
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-set tracedepth 1
+set tracedepth 3
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 50
-if 0   	local vce vce(bootstrap, reps(`Nreps'))
+local Nreps = 25
+if 01     	local vce vce(bootstrap, reps(`Nreps'))
 else if 0	local vce vce(bspctile , reps(`Nreps'))
 else       	local vce " "
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -711,10 +740,10 @@ qui {
 	replace high_after = 2 if high==0 & after==1
 	replace high_after = 3 if high==1 & after==0
 	replace high_after = 4 if high==1 & after==1
-	label define high_after 1 "Control Group, First Period"   ///
-	                        2 "Control Group, Second Period"  ///
-	                        3 "Treatment Group, First Period" ///
-	                        4 "Treatment Group, Second Period"
+	label define high_after 1 "Control Group, 1st Period"   ///
+	                        2 "Control Group, 2nd Period"   ///
+	                        3 "Treatment Group, 1st Period" ///
+	                        4 "Treatment Group, 2nd Period"
 	label val high_after high_after
 }
 set seed 1
@@ -732,10 +761,16 @@ tabstat y ly , by(high_after) s(count mean sd min p25 p50 p75 p90 max) columns(s
 reg y high##after
 reg ly high##after
 
+cic  ly high after ,  at(5(2.67)95) `vce'
+ereturn list
+* set trace on
+cicgraph
+exit
+
 // CIC estimates from A&I Appendix
 // Table 2
 timer on 2
-cic  y high after ,  at(25 50 75 90) `vce' 
+cic  y high after ,  at(25 50 75 90) `vce'
 cic ly high after ,  at(50)          `vce'
 timer off 2
 timer list 2
@@ -750,21 +785,27 @@ timer list 3
 log close
 
 // compare vce() option above to the bootstrap prefix
+
 timer on 10
 cic y high after, vce(bootstrap, reps(`Nreps'))
 timer off 10
 timer list 10
-est store X11
+ereturn list
 estat bootstrap , all // estat bootstrap does work
 
-set trace on
-estimates replay X11
-exit
+cic // test replay works
+
 timer on 12
-bootstrap , reps(`Nreps') strata(high after) : cic y high after
+cap nois bootstrap, reps(`Nreps') strata(high after) : cic y high after
 timer off 12
 timer list 12
 
+// test if selected vars works
+cap nois bootstrap [continuous]_b[mean], reps(20) strata(high after) : cic y high after
+
+// test jacknife
+jacknife: cic y high after if uniform()<.1
+exit
 
 // check weights are working
 gen testweight =(uniform()<.95) + (uniform()<.20)
@@ -783,7 +824,6 @@ set seed 1
 cic  y high after ,  at(25 50 75 90) vce(bspctile , reps(`Nreps'))
 */
 
-exit
 
 // we should get an error if try to use weights
 cap nois {
@@ -917,10 +957,10 @@ struct cic_result scalar cic_seperate(real colvector Y00, real colvector Y01, re
 	// CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
 	result.dci = cic_dci(F00,F01,F10,F11,YS,YS01,at)
 
-	// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	// DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
 	result.dcilowbnd = cic_lower(F00,F01,F10,F11,YS,YS01,at)
 
-	// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	// DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
 	result.dciuppbnd = cic_upper(F00,F01,F10,F11,YS,YS01,at)
 
 	// DONE.  RETURN STRUCTURE W/ FOUR ROW VECTORS.
@@ -1003,7 +1043,7 @@ real vector cic_dci(real vector F00, real vector F01, real vector F10, real vect
 }
 
 
-// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+// DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
 real vector cic_lower(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
 {
 	// this function calculates the discreate outcomes CIC estimator
@@ -1035,7 +1075,7 @@ real vector cic_lower(real vector F00, real vector F01, real vector F10, real ve
 }
 
 
-// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+// DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
 real vector cic_upper(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
 {
 	// this function calculates the discreate outcomes CIC estimator
