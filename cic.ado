@@ -100,10 +100,15 @@ program define Estimate, eclass byable(recall)
 // However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other variables.
 
 
-// nodots not working? 
+// nodots not working?
 
 
 // if control varaibles and bootstrap, produce an error.
+
+
+
+// add SE integration
+// add DID estimates?
 
 
 	// prep to handle weights
@@ -152,14 +157,14 @@ program define Estimate, eclass byable(recall)
 	tempname eresults
 	if "`untreated'"=="" {
 		// default - effect of treatment on the treated
-		qui mata: cic_caller( "`yadj'", "`treat'",     "`post'", "`touse'", "at", `bsreps', `dots', `sedelta' `wtexp_caller')
+		mata: cic_caller( "`yadj'", "`treat'",     "`post'", "`touse'", "at", `bsreps', `dots', `sedelta' `wtexp_caller')
 		mat `eresults' = e(results)
 	}
 	else {
 		// option - effect of treatment on the untreated (just switch `treat' variable and use -e(results))
 		tempvar untreated
 		gen `untreated' = (`treat'==0)
-		qui mata: cic_caller( "`yadj'", "`untreated'", "`post'", "`touse'", "at", `bsreps', `dots', `sedelta' `wtexp_caller')
+		mata: cic_caller( "`yadj'", "`untreated'", "`post'", "`touse'", "at", `bsreps', `dots', `sedelta' `wtexp_caller')
 		mat `eresults' = e(results)
 		matrix `eresults' = -`eresults'
 	}
@@ -193,6 +198,7 @@ program define Estimate, eclass byable(recall)
 		ereturn display
 	}
  	ereturn local cmd     "cic"
+ 	ereturn local depvar  "`y'"
  	ereturn local cmdline `"cic `0'"'
  	ereturn local vce     "`vce'"
 	ereturn local title   "Changes in Changes (CIC) Estimation)"
@@ -219,7 +225,7 @@ program define cic_vce_parse, rclass
 	version 11.2
 	syntax , vce(string asis)
 	_parse comma vce 0 : vce
-	if  inlist( "`vce'","bootstra","bootstr","bootst","boots","boot","boo","bo")     local vce "bootstrap"
+	if  inlist( "`vce'","bootstra","bootstr","bootst","boots","boot","boo","bo","b") local vce "bootstrap"
 	if  inlist( "`vce'","delt","del","de","d")                                       local vce "delta"
 	if  inlist( "`vce'","non","no","n")                                              local vce "none"
 
@@ -277,7 +283,7 @@ struct cic_result {
 
 
 // CIC CALLER -- THIS FUNCTION READS STATA DATA INTO MATA AND CALLS THE MAIN CIC ROUTINE
-struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var, string scalar post_var, string scalar touse_var, string scalar at_local, real scalar bsreps, real scalar dots, real scalar sedelta, |string scalar wgt_var)
+void cic_caller(string scalar y_var, string scalar treat_var, string scalar post_var, string scalar touse_var, string scalar at_local, real scalar bsreps, real scalar dots, real scalar sedelta, |string scalar wgt_var)
 {
 	// Inputs:
 	//   1-4. Names of variables `y', `treat', `post', and `touse'
@@ -411,10 +417,7 @@ struct cic_result scalar cic_caller(string scalar y_var, string scalar treat_var
 _error( "Code for sedelta=0 not written." )
 	}
 
-
-	// DONE.  Pass results back to caller
-	return(result)
-}
+} // end of cic_caller; everthing is returned to Stata with st_*() commands.
 
 
 // >>>>>>>>>>  check that column names and such are the same as the ouput in the example in the NOTE (below)
@@ -453,6 +456,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	real colvector YS, YS01
 	YS01 = uniqrows(Y01)
 	YS   = uniqrows(Y00\YS01\Y10\Y11)
+	if (length(YS)<2) _error("The dependent variable is a constant")
 
 	// Vector with CDF functions of the four treat*post groups (F00,F01,F10,F11)
 	// CDFs (w/ and w/out weights declared)
@@ -686,42 +690,51 @@ end
 
 
 
-
 program define cicgraph, sortpreserve
 
+	// parse arguements
 	syntax [, ///
-		Ci(name) /// {normal | percentile | bc | bca} ///
+		Ci(name) /// {normal|percentile|bc|bca|*} ///
+			/// ci() expecting normal, percentile, bc, or bca. However it will still
+			/// work if there is a conforming matrix named e(ci_`ci')
+			/// by default, -normal- is used if matrix e(ci_normal) exists
 		Equations(namelist) /// {continuous, discrete_ci, dci_lower_bnd, and/or dci_upper_bnd}
 		Name(name) /// graph names; if >1  name in equations(), names get .  graphs in memory will be replaced.
 		*]
 
 	if ("`e(cmd)'"!="cic") | (lower(e(vcetype))!="bootstrap") error 301
-	
-	// cic option
-	if mi("`ci'") local ci normal // ci_normal by default
-	else if !inlist("`ci'","normal","percentile","bc","bca") {
-		di as err "ci() must be normal, percentile, bc, bca, or otherwise available in a conforming matrix named e(ci_`ci')"
-		error 198
-	}
 
-	// pull coefficients and CI
+	// pull coefficients
 	tempname b int
-	tempvar coef eqn p pctile mean meanll meanul meanaxis 
+	tempvar coef eqn p pctile mean meanll meanul meanaxis
 	matrix `b'  = e(b)
 	matrix `b'  = `b''
-
-	matrix `int' =  e(ci_`ci')
-	matrix `int' = `int''
-	local level =  e(level)
-
 	svmat `b' , names("`coef'")
-	svmat `int',
+
+	// cic option
+	cap qui di colsof(e(ci_normal))
+	if !_rc & mi("`ci'")         local ci "normal"
+	if regexm("`ci'","^ci_(.*)") local ci = regexs(1) // if someone types ci_normal instead of normal, drop the "ci_"
+	if !mi("`ci'") {
+		if !inlist("`ci'","normal","percentile","bc","bca") di as txt "ci() expecting normal, percentile, bc, or bca. However it will work if there is a conforming matrix named e(ci_`ci')"
+		matrix `int' =  e(ci_`ci')
+		matrix `int' = `int''
+		local level =  e(level)
+		svmat `int',
+	}
+	else {
+		gen `int'1=.
+		gen `int'2=.
+	}
 
 	local rows = rowsof(`b')
 	if (c(N) < `rows') set obs `rows'
 
 	local names : rownames `b'
 	local eqns  : roweq `b'
+
+	local ylab : var lab `e(depvar)'
+	if mi(`"`ylab'"') local ylab = e(depvar)
 
 	qui {
 		gen `eqn' = ""
@@ -735,19 +748,17 @@ program define cicgraph, sortpreserve
 			if regexm("`thisname'","^p([0-9]*)_?([0-9]*)") replace `pctile' = real(regexs(1)+"."+regexs(2)) in `i'
 		}
 
-		bys `eqn' (`p'): gen `mean'     = `coef'[1]
-		by  `eqn'      : gen `meanll'   = `int'1[1]
-		by  `eqn'      : gen `meanul'   = `int'2[1]
-		gen     `meanaxis' = 0 
-		replace `meanaxis' = 100 if `p'!="mean" 
+		bys `eqn' (`p'): gen `mean'     = `coef'[1] if inlist(_n,1,_N)
+		by  `eqn'      : gen `meanll'   = `int'1[1] if inlist(_n,1,_N)
+		by  `eqn'      : gen `meanul'   = `int'2[1] if inlist(_n,1,_N)
+		gen     `meanaxis' = 0
+		replace `meanaxis' = 100 if `p'!="mean"
 	}
 
-	list `eqn' `p' `pctile' `coef' `int'1 `int'2 `mean' `meanll' `meanul' `meanaxis' if !mi(`coef'), sepby(`eqn')
-
 	// graph results
-	if mi("`equations'") local equations "continuous" 
-	local c=1 
-	foreach eqnname of local equations {		
+	if mi("`equations'") local equations "continuous"
+	local c=1
+	foreach eqnname of local equations {
 		if      "`eqnname'"=="continuous"    local eqnlabel "CIC model with continuous outcomes"
 		else if "`eqnname'"=="discrete_ci"   local eqnlabel "CIC model with discrete outcomes"
 		else if "`eqnname'"=="dci_lower_bnd" local eqnlabel "Discrete CIC model lower bound"
@@ -756,7 +767,9 @@ program define cicgraph, sortpreserve
 			di as error "eqnname() should be continuous, discrete_ci, dci_lower_bnd, dci_upper_bnd"
 			error 198
 		}
-		
+
+		if !mi("`ci'") local addlegendlabels label(4 "Quantiles `level'% CI") label(2 "Mean `level'% CI")
+		if !mi("`ci'") local addlegendorder  "4 2"
 
 		graph twoway ///
 			(scatter `mean'        `meanaxis', sort pstyle(p2) connect(L) msymbol(none) lwidth(*1.25)) ///
@@ -765,13 +778,11 @@ program define cicgraph, sortpreserve
 			(rcap    `int'1 `int'2 `pctile',   sort pstyle(p1) lcolor(*.85) lwidth(*.85)) ///
 			(scatter `coef'        `pctile',   sort pstyle(p1) msize(*1.15) connect(L)) ///
 				if `eqn'=="`eqnname'", ///
-				legend(order(5 1 4 2) label(5 "Quantiles") label(4 "Quantiles `level'% CI") ///
-					   cols(2)        label(1 "Mean")      label(2 "Mean `level'% CI")) ///
-				xtitle( "Quantile" ) ytitle("") title( "`eqnlabel'") subtitle( "`=e(footnote)'" ) ///
+				legend(order(5 1 `addlegendorder') cols(2) label(5 "Quantiles") label(1 "Mean") `addlegendlabels' ) ///
+				xtitle( "Quantile" ) ytitle(`"`ylab'"') title( "`eqnlabel'") subtitle( "`=e(footnote)'" ) ///
 				name(`name'`=cond(`c'>1,"`c'","")',replace) `options'
 		local ++c
 	}
-
 end // end of cic program definition
 
 cd "C:\Users\keith\Desktop\CIC\"
@@ -793,11 +804,12 @@ set tracedepth 3
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 1000
+local Nreps = 200
 if 01     	local vce vce(bootstrap, reps(`Nreps'))
 else if 0	local vce vce(bspctile , reps(`Nreps'))
 else       	local vce " "
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -876,12 +888,13 @@ timer list 3
 log close
 
 
-// graphs 
+// graphs
 cic  y high after ,  at(1 5(2.5)90) `vce'
 cicgraph,  name(g) e(continuous discrete_ci dci_lower_bnd dci_upper_bnd)
 
 // compare vce() option above to the bootstrap prefix
 
+set seed 1
 timer on 10
 cic y high after, vce(bootstrap, reps(`Nreps'))
 timer off 10
@@ -890,6 +903,7 @@ ereturn list
 estat bootstrap , all // estat bootstrap does work
 
 cic // test replay works
+est store a
 
 timer on 12
 cap nois bootstrap, reps(`Nreps') strata(high after) : cic y high after
@@ -911,13 +925,13 @@ expand testweight
 cic y  high after                ,  at(25 50 75 90)
 cic y  high after                ,  at(25 50 75 90)
 
-/*
+
 // direct comparision of vce() options
+est restore a
+
 set seed 1
-cic  y high after ,  at(25 50 75 90) vce(bootstrap, reps(`Nreps'))
-set seed 1
-cic  y high after ,  at(25 50 75 90) vce(bspctile , reps(`Nreps'))
-*/
+cic y high after, vce(bootstrap, reps(`Nreps') sepercentile)
+
 
 
 // we should get an error if try to use weights
@@ -948,6 +962,28 @@ cic wage TREAT1 POST1 i.occupation,  at(10(10)90 99.5)
 
 
 
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+* The following code can be used to test the program using "fake" data
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+clear
+set obs 4
+gen post  = inlist(_n,1,3)
+gen treat = inlist(_n,1,2)
+local n_g=500
+expand `n_g'
+bys p t: gen y = _n / `n_g'
+gen     d = 1.75 - 1.5 * y if t==0 & p==0
+replace d = 0.75 - 0.5 * y if t==0 & p==1
+replace d = 0.80 - 0.4 * y if t==1 & p==0
+replace d = 0.50 - 1.0 * y if t==1 & p==1
+replace d = round(d,.01)
+cic d treat post,  at(10(10)90) vce(b)
+
+*set trace on
+cicgraph , name(r1)
+cicgraph , ci(ci_percentile) name(r2)
+
+exit
 
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 // NOTE:
@@ -959,12 +995,11 @@ cic wage TREAT1 POST1 i.occupation,  at(10(10)90 99.5)
 // lead to slower runtimes.
 // - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - -
 
-version 11.2
 mata:
-mata clear
 mata set matastrict on
-mata set matafavor speed
 
+// PARELLEL FUNCTION TO CIC() WITH MORE LEGIBLE CODE
+// CIC estimates only -- No bootstrapping, SEs, or DID
 struct cic_result scalar cic_seperate(real colvector Y00, real colvector Y01, real colvector Y10, real colvector Y11, real rowvector at, | real colvector W00, real colvector W01, real colvector W10, real colvector W11 )
 {
 	// Inputs:
@@ -986,17 +1021,14 @@ struct cic_result scalar cic_seperate(real colvector Y00, real colvector Y01, re
 	// Need all or none of args (6)-(9)
 	if (args()>5 & args()!=9) _error(( "Expected 5 or 9 arguements, but received " + strofreal(args())))
 
-	// Declare variables
-	real colvector YS, YS01
-	real colvector F00, F01, F10, F11
-	struct cic_result scalar result
-
 	// Vector with support points for all four groups combined (YS) and the comparison-post group (YS01)
+	real colvector YS, YS01
 	YS01 = uniqrows(Y01)
 	YS   = uniqrows(Y00\YS01\Y10\Y11)
 
 	// Vector with CDF functions of the four treat*post groups (F00,F01,F10,F11)
 	// CDFs (w/ and w/out weights declared)
+	real colvector F00, F01, F10, F11
 	if (args()==5) {
 		// CDFs without weights
 		F00=runningsum(prob(Y00,YS))
@@ -1017,6 +1049,9 @@ struct cic_result scalar cic_seperate(real colvector Y00, real colvector Y01, re
 		F11[length(F11)]=1
 	}
 
+	// Results will be returned into a structure w/ 4 vectors for con, dci, lower, upper
+	struct cic_result scalar result
+
 	// CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
 	result.con = cic_con(F00,F01,F10,F11,YS,YS01,at)
 
@@ -1033,7 +1068,6 @@ struct cic_result scalar cic_seperate(real colvector Y00, real colvector Y01, re
 	// Each vector has mean estimate in first column, plus one column for each element of "at"
 	return(result)
 }
-
 
 
 // CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
@@ -1171,6 +1205,7 @@ real vector cic_upper(real vector F00, real vector F01, real vector F10, real ve
 	// matrix has mean estimate in first column, plus one column for each element of "at"
 	return(est_upper)
 }
+
 
 // Confirm cic() == cic_seperate()
 struct cic_result scalar result1, result2
