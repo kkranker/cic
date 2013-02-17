@@ -30,6 +30,8 @@ clear all
 *        bootstrap[, bsopts]| use bootstrap (by default, 1000 reps stratified by treat/post) other options allowed
 *    did                      calculated traditional DID and quantile DID (always on if there are any control variables)
 *    untreated                counterfactual effect of the policy for the untreated group (Setion 3.2 of paper)
+*    round(integer)           round dependent variable to nearest r (=0 for no rounding, the default)
+*                             this rounding is performed after adjusting for covariates, if applicable
 *
 *  REPORTING
 *      level(passthru)              set confidence level; default is level(95)
@@ -49,11 +51,12 @@ clear all
 *     accel(vector)                acceleration values for each statistic
 *     mse                          use MSE formula for variance estimation
 *     nodots                       suppress the replication dots
+*     pop(#)                       total sample size (used for scaling iweights for bootstrap replications)
+*                                      the sample in each group is calculated as the sum of the iweights for observations in the group, divided by the sum of the iweights for all observations, and multiplied by the population size
 *  See [R] bootstrap postestimation for features available after estimation.
 
 
-
-* Weights may be iweights or fweights.  Weights are not allowed with vce(boostrap).
+* Weights may be iweights or fweights.
 
 program cic, properties(mi) eclass byable(onecall)
 	version 11.2
@@ -74,13 +77,12 @@ program define Estimate, eclass byable(recall)
 	version 11.2
 
 	// parse arguments
-	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fw iw]  ///
+	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fweight iweight]  ///
 		[, at(numlist min=1 >=0 <=100 sort) ///
 		Vce(passthru) ///
 		did ///
 		UNTreated ///
-		ROUnd(real 0) /// round dependent variable to nearest r (=0 for no rounding, the default)
-		              ///  this rounding is performed after adjusting for covariates, if applicable
+		ROUnd(real 0) ///
 		level(passthru) notable NOHeader NOLegend * ] // Reporting options
 	marksample touse  // note that rows are dropped for (1) if/in (2) zero weight (3) missing data (and other reasons, see "help mark")
 	_get_diopts diopts, `options'
@@ -115,19 +117,6 @@ program define Estimate, eclass byable(recall)
 // add DID estimates?
 
 
-	// prep to handle weights
-	if !missing("`weight'") {
-		tempvar wgtvar
-		gen `wgtvar'`exp' if `touse'
-		local wtexp_caller = `", "`wgtvar'" "'
-		summ `wgtvar' if `touse' , meanonly
-		local n=round(r(sum))
-	}
-	else {
-		qui count if `touse'
-		local n=r(N)
-	}
-
 	// parse percentiles
 	if mi("`at'") local at "10(10)90" // default set (if undeclared)
 	numlist "`at'"
@@ -138,10 +127,31 @@ program define Estimate, eclass byable(recall)
 	cic_vce_parse, `vce'
 	local vce     = r(vce)
 	local bsreps  = r(bsreps)
+	local bsiwpop = r(bsiwpop)
 	local dots    = r(dots)
 	if !missing(r(bsopts))       local bsopts       = r(bsopts)
 	if !missing(r(saving))       local saving       = r(saving)
 	local sepercentile = (r(sepercentile)==1)
+
+	// prep to handle weights
+	if !missing("`weight'") {
+		tempvar wgtvar
+		gen `wgtvar'`exp' if `touse'
+		summ `wgtvar' if `touse' , meanonly
+		local n=round(r(sum))
+		if "`wgtvar'"=="iweight" {
+			if ("`vce'"=="bootstrap" & `bsiwpop'==0) {
+				di as error "If bootstrapping standard errors with iweights, you must use the vce(bootstrap, pop(N)) suboption to declare the population size."
+				error 198
+			}
+			local wtexp_caller = `", "`wgtvar'", `bsiwpop' "'
+		}
+		else local wtexp_caller = `", "`wgtvar'", `bsiwpop' "'
+	}
+	else {
+		qui count if `touse'
+		local n=r(N)
+	}
 
 
 	// adjust y for covariates (OLS regression)
@@ -196,13 +206,15 @@ if ( `runDID' ) regress `y' ib0.`treat'##ib0.`post' `varlist' if `touse' [`weigh
  	ereturn local depvar  "`y'"
  	ereturn local cmdline `"cic `0'"'
  	ereturn local vce     "`vce'"
-	ereturn local title   "Changes in Changes (CIC) Model)"
+	ereturn local title   "Changes in Changes (CIC) Model"
 	if (`: list sizeof varlist'!=0 | `runDID') {
-		ereturn mat did_b = `did_b'
-		ereturn mat did_V = `did_V'
+		ereturn scalar k_eq =  5
+		ereturn local  eqnames continuous discrete_ci dci_lower_bnd dci_upper_bnd did
 	}
- 	ereturn scalar k_eq =  4
- 	ereturn local  eqnames "continuous discrete_ci dci_lower_bnd dci_upper_bnd"
+	else {
+	 	ereturn scalar k_eq =  4
+		ereturn local  eqnames continuous discrete_ci dci_lower_bnd dci_upper_bnd 
+	}
 	if !missing("`untreated'")   ereturn local footnote "Effect of Treatment on the Treated Group"
 	else                         ereturn local footnote "Effect of Treatment on the Untreated Group"
 	di as txt "(" e(footnote) ")"
@@ -235,8 +247,9 @@ program define cic_vce_parse, rclass
 
 	return local vce `vce'
 	if ("`vce'"=="bootstrap") {
-		syntax [, Reps(integer 200) SAving(string asis) NODots SEPercentile *]
+		syntax [, Reps(integer 200) pop(integer 0) SAving(string asis) NODots SEPercentile *]
 		return scalar bsreps  = `reps'
+		return scalar bsiwpop = `pop'
 		return scalar dots  = ( "nodots"!="`dots'" )
 		return scalar sepercentile = ( "sepercentile"=="`sepercentile'" )
 		return local  saving  : copy local saving
@@ -274,11 +287,12 @@ struct cic_result {
 struct did_ols_result {
 	pointer(real colvector) Y
 	real colvector coef
-	string matrix coef_labels
+	string matrix labels
 }
 
+
 // CIC CALLER -- THIS FUNCTION READS STATA DATA INTO MATA AND CALLS THE MAIN CIC ROUTINE
-void cic_caller(string rowvector varlist, string scalar touse_var, string scalar at_local, real scalar did, real scalar tot, real scalar bsreps, real scalar dots, real scalar round, |string scalar wgt_var)
+void cic_caller(string rowvector varlist, string scalar touse_var, string scalar at_local, real scalar did, real scalar tot, real scalar bsreps, real scalar dots, real scalar round, |string scalar wgt_var, real scalar popsize)
 {
 	// Inputs:
 
@@ -299,29 +313,35 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	//         - if =(-1), standard error for conditional independence based on numerical differentiation
 	//   7.   0/1 to hide bootstrapping dots (=1 to show dots)
 	//   8.  Round y to the nearest ___.  (set =0 for no rounding).
-	//   9.   (Optional) Name of variable with fweight or iweight
+	//   (Optional)
+	//   9.  Name of variable with fweight or iweight
+	//   10. Population size for scaling iweights.  Set to zero if fweights.  (This is only used if bootstrapping SEs.)
 	// Output: Output is returned to stata through various st_*() functions.
 
 	// Read y, treat and post into mata
 	real colvector y, treat, post
-	pointer(real colvector) scalar Y
+	real scalar N
 	varlist = tokens(varlist)
 	st_view(y    =.,.,varlist[1],touse_var)  // note that rows with missing data are already dropped by -marksample- in .ado file
+	N   = rows(y)
 	st_view(treat=.,.,varlist[2],touse_var)
 	st_view(post =.,.,varlist[3],touse_var)
-	if (uniqrows(treat\post)!=(0\1)) {
+	if ((uniqrows(treat),uniqrows(post))!=(0,0\1,1)) {
 		_error( "treat and post must be dummy variables equal to 0 and 1" )
 	}
+
 	// read control variables into mata (if need to run DID model)
 	if (length(varlist)>3 | did ) {
 		did = 1  // always run DID regression if control variables present
 		real matrix rhs
 		st_view(rhs =.,.,varlist[2..length(varlist)],touse_var)  // note that rows with missing data are already dropped by -marksample- in .ado file
 	}
+
 	// read weights into mata (if there are any)
-	if (args()==9) {
+	if (args()!=8) {
 		real colvector wgt
 		st_view(wgt=.,.,wgt_var,touse_var)
+		if (args()==9) popsize=0
 	}
 	else wgt=1
 
@@ -338,12 +358,13 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	// After this section, upper-case Y is now the dependent variable for
 	// the cic() function. It is a pointer. It points to (lower case) y
 	// or a (temporary) variable that is adjusted for covariates and/or rounded.
+	pointer(real colvector) scalar Y
+	Y = &y
 	if (did) {
 		didresult = did_ols(y, rhs, wgt, round, varlist)
-		Y = didresult.Y
+		swap(Y,didresult.Y)
 	}
 	else if (round!=0) Y = &round(y,round)
-	else Y = &y
 
 "sizeof(y)"
 sizeof(y)
@@ -362,75 +383,135 @@ rows(uniqrows(y))
 "unique rows in *Y"
 rows(uniqrows(*Y))
 
-	// Select the rows belonging to the treat*post groups
-	real colvector Y00, Y01, Y10, Y11
-"OKa"
-	st_select(Y00=.,*Y,(treat:==0 :& post:==0))
-"OKb"
-	st_select(Y01=.,*Y,(treat:==0 :& post:==1))
-	st_select(Y10=.,*Y,(treat:==1 :& post:==0))
-	st_select(Y11=.,*Y,(treat:==1 :& post:==1))
-	if (min((length(Y00),length(Y01),length(Y10),length(Y11)))==0) _error( "One or more of the four treat*post groups is empty." )
+	// Permutation vectors identifying the four treat*post groups
+	real colvector p00, p01, p10, p11
+	st_select(p00=.,(1::N),(treat:==0 :& post:==0))
+	st_select(p01=.,(1::N),(treat:==0 :& post:==1))
+	st_select(p10=.,(1::N),(treat:==1 :& post:==0))
+	st_select(p11=.,(1::N),(treat:==1 :& post:==1))
 
-	// Select the rows of wgt belonging to the treat*post groups
-	if (args()==9) {
-		real colvector W00, W01, W10, W11
-		st_select(W00=.,wgt,(treat:==0 :& post:==0))
-		st_select(W01=.,wgt,(treat:==0 :& post:==1))
-		st_select(W10=.,wgt,(treat:==1 :& post:==0))
-		st_select(W11=.,wgt,(treat:==1 :& post:==1))
-	}
+	// Number of observations
+	real scalar N00, N01, N10, N11
+	N00 = rows(p00);
+	N01 = rows(p01)
+	N10 = rows(p10)
+    N11 = rows(p11)
+	if (min((N00,N01,N10,N11))<1) _error( "One or more of the four treat*post groups is empty.")
+	if (min((N00,N01,N10,N11))<2 & bsreps>0) _error( "One or more group has size less than 2. There will be no variation in bootstrap draws.")
+
+
+//	// Select the rows belonging to the treat*post groups
+//	real colvector Y00, Y01, Y10, Y11
+//	st_select(Y00=.,*Y,(treat:==0 :& post:==0))
+//	st_select(Y01=.,*Y,(treat:==0 :& post:==1))
+//	st_select(Y10=.,*Y,(treat:==1 :& post:==0))
+//	st_select(Y11=.,*Y,(treat:==1 :& post:==1))
+//
+//	// Select the rows of wgt belonging to the treat*post groups
+//	if (args()!=8) {
+//		real colvector W00, W01, W10, W11
+//		st_select(W00=.,wgt,(treat:==0 :& post:==0))
+//		st_select(W01=.,wgt,(treat:==0 :& post:==1))
+//		st_select(W10=.,wgt,(treat:==1 :& post:==0))
+//		st_select(W11=.,wgt,(treat:==1 :& post:==1))
+//	}
 
 	// Call the main CIC routine
-	if (args()!=9) result=cic(Y00,Y01,Y10,Y11,at)                 // without weights
-	else           result=cic(Y00,Y01,Y10,Y11,at,W00,W01,W10,W11) // with weights
+	if (args()==8) result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
+	else           result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
 "end of cic()"
 
-	// Return results into a Stata matrix too
+	// return results into a Stata matrix named st_local("mata_b"),
+	// and Label the columns of the matrix
 	string matrix colfulllabels
-	st_matrix("e(at)",at)
-if (0 & did) {
-		if (tot==1) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
-		else        st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
-	}
-	else {
-		if (tot==1) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
-		else        st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
-	}
+	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
 
-	// Label the columns of the matrix
-	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("p":+strofreal(at*100))))'))
-if (0 & did) {
-		st_matrixcolstripe(st_local("mata_b"), (colfulllabels\didresult.coef_labels))
-		st_local("cic_coleq"   ,invtokens((colfulllabels\didresult.coef_labels)[.,1]'))
-		st_local("cic_colnames",invtokens((colfulllabels\didresult.coef_labels)[.,2]'))
+	if (did) {
+		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
+		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
+	    colfulllabels = (colfulllabels \ didresult.labels)
 	}
 	else {
-		st_matrixcolstripe(st_local("mata_b"), colfulllabels)
-		st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
-		st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
+		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 	}
-stata("mat list " + st_local("mata_b"))
+	st_matrixcolstripe(st_local("mata_b"), colfulllabels)
+	st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
+	st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
+
+	// return
+	st_matrix("e(at)",at)
 	st_numscalar( "e(N_strata)", 4)
-	if (args()!=9) {
-		st_numscalar( "e(N)"       , rows(y))
+	if (args()==8) {
+		st_numscalar( "e(N)"       , N)
+		st_numscalar( "e(N00)"     , N00)
+		st_numscalar( "e(N01)"     , N01)
+		st_numscalar( "e(N10)"     , N10)
+		st_numscalar( "e(N11)"     , N11)
+	}
+	else if (popsize) {
+		st_numscalar( "e(N)"       , round(popsize))
+		st_numscalar( "e(N_obs)"   , N)
 	}
 	else {
 		st_numscalar( "e(N)"       , round(sum(wgt)))
-		st_numscalar( "e(N_obs)"   , rows(y))
+		st_numscalar( "e(N_obs)"   , N)
 	}
-	st_numscalar( "e(N00)"     , rows(Y00))
-	st_numscalar( "e(N01)"     , rows(Y01))
-	st_numscalar( "e(N10)"     , rows(Y10))
-	st_numscalar( "e(N11)"     , rows(Y11))
 	st_numscalar( "e(N_support)",rows(uniqrows(*Y)))
+
 
 	// Bootstrapping
 	if (bsreps>0) {
 		real scalar b
-		struct cic_result scalar bs_loop
+		real colvector bs_wgt
+		struct did_ols_result scalar bs_didresult
+		struct cic_result     scalar bs_cicresult
+
+		// pointer to y
+		// a second pointer is needed might adjust y for covariates with boostrap sample
+		pointer(real colvector) scalar bs_Y
+		if (round!=0 & !did) bs_Y = &round(y,round)
+		else bs_Y = &y
+
+		// empty matrix to store results
 		real matrix bsdata
-		bsdata=J(bsreps,4*(1+length(at)),.)
+		if (did) bsdata=J(bsreps,4*(1+length(at))+length(didresult.coef),.)
+		else     bsdata=J(bsreps,4*(1+length(at)),.)
+
+		// Before loop, extra setup needed for drawing a sample with unequal weights
+		if (args()!=8) {
+			// weight variables with cumulative sum of the weights from each group
+			real colvector cumsum00, cumsum01, cumsum10, cumsum11
+			cumsum00 = quadrunningsum(wgt[p00])
+			cumsum01 = quadrunningsum(wgt[p01])
+			cumsum10 = quadrunningsum(wgt[p10])
+			cumsum11 = quadrunningsum(wgt[p11])
+
+			// scalars with population size for each group
+			real scalar popsize00, popsize01, popsize10, popsize11
+			if (popsize) {
+				// With importance weights, use the fraction of popsize (e.g., popsize00 = round(cumsum00[n00]/colsum(wgt)*popsize))
+				real scalar sumwgt
+				sumwgt = quadcolsum(wgt)
+				popsize00 = round(cumsum00[N00]/sumwgt*popsize) // the number of obs. in each group is rounded to the nearest integer
+				popsize01 = round(cumsum01[N01]/sumwgt*popsize)
+				popsize10 = round(cumsum10[N10]/sumwgt*popsize)
+				popsize11 = round(cumsum11[N11]/sumwgt*popsize)
+			}
+			else {
+				// With frequency weights, this is the weighted number of individuals in the group (e.g., popsize00 = cumsum00[n00])
+				popsize00 = cumsum00[N00]
+				popsize01 = cumsum01[N01]
+				popsize10 = cumsum10[N10]
+				popsize11 = cumsum11[N11]
+				if (round(popsize00)!=popsize00 | round(popsize01)!=popsize01 | round(popsize10)!=popsize10 | round(popsize11)!=popsize11) "When drawing bootstrap sample with frequency weights, found non-integer fweights in one or more groups."
+			}
+			cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
+			cumsum01 = cumsum01/cumsum01[N01]
+			cumsum10 = cumsum10/cumsum10[N10]
+			cumsum11 = cumsum11/cumsum11[N11]
+			if (min((popsize00,popsize01,popsize10,popsize11))<2) "One or more groups has size less than 2. There will be no variation in bootstrap draws."
+		}
 
 		// header for dots
 		if (dots) {
@@ -440,36 +521,43 @@ stata("mat list " + st_local("mata_b"))
 				"{hline 3}{c +}{hline 3} 4 " + "{hline 3}{c +}{hline 3} 5 ")
 		}
 
-		if ((args()==9) & (round(wgt)!=wgt)) _error( "CIC bootstrapping does not work with iweights." )
-
+		// Bootstrapping replications
 		for(b=1; b<=bsreps; ++b) {
-		
-		
-if (b==1) {
 
-colvector p00
-st_select(p00=.,(1::rows(*Y)),(treat:==0 :& post:==1))
-draw_w_replacement(p00,1,1,1,rows(Y00),1,1,1,wgt)
+			// Draw bootstrap sample
+			// draw_w_replacement() produces a vector with frequency weights in the unweighted case
+			// or a replacement weight vector (iweights or fweights) in the weighted case
+			if (args()==8) bs_wgt = draw_w_replacement(p00, p01, p10, p11, N00, N01, N10, N11)
+			else           bs_wgt = draw_w_replacement(p00, p01, p10, p11, N00, N01, N10, N11, cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
 
-}
-		
-			if (args()!=9) bs_loop=cic(drawsmpl(Y00),drawsmpl(Y01),drawsmpl(Y10),drawsmpl(Y11),at)                 // without weights
-			else           bs_loop=cic(drawsmpl(Y00,W00),drawsmpl(Y01,W01),drawsmpl(Y10,W10),drawsmpl(Y11,W11),at) // with frequency weights
+			// calculate DID and adjust for covariates w/ bootstrap sample
+			if (did) {
+				bs_didresult = did_ols(y, rhs, bs_wgt, round, varlist)
+				swap(bs_Y,bs_didresult.Y)
+			}
 
-			// save into return structure
-			if (tot==1) bsdata[b,.]  =  (bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd)
-			else        bsdata[b,.]  = -(bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd)
+			// call cic() with bootstrap sample
+			bs_cicresult=cic((*bs_Y)[p00],(*bs_Y)[p01],(*bs_Y)[p10],(*bs_Y)[p11],at,bs_wgt[p00],bs_wgt[p01],bs_wgt[p10],bs_wgt[p11])
+
+			// save estimates into a matrix with one row per bootstrap sample
+			if (did) {
+				if (tot==1) bsdata[b,.]  =  (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')
+				else        bsdata[b,.]  = -(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')
+			}
+			else {
+				if (tot==1) bsdata[b,.]  =  (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+				else        bsdata[b,.]  = -(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+			}
 
 			// show dots
 			if (dots) {
-				if (missing((bs_loop.con,bs_loop.dci,bs_loop.dcilowbnd,bs_loop.dciuppbnd))) printf( "{err}x{txt}")
+				if (missing((bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd))) printf( "{err}x{txt}")
 				else printf( ".")
 				if (!mod(b,50)) printf( " %5.0f\n",b)
 				displayflush()
 			}
 		} // end loop through bs iterations
-		if (dots & mod(b-1,50)) display("")
-
+		if (dots & mod(b-1,50)) display("") // end of dots
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
 		  string rowvector bstempfile, bstempvars
@@ -480,20 +568,31 @@ draw_w_replacement(p00,1,1,1,rows(Y00),1,1,1,wgt)
 		  st_store(.,st_addvar("double",bstempvars), bsdata)
 		  // setup file for bstat command
 		  st_global( "_dta[bs_version]" , "3")
-		  if (args()!=9) st_global( "_dta[N]", strofreal(rows(y)))
-		  else           st_global( "_dta[N]", strofreal(round(sum(wgt))))
+		  if (args()==8)    st_global( "_dta[N]", strofreal(N))
+		  else if (popsize) st_global( "_dta[N]", strofreal(popsize))
+		  else              st_global( "_dta[N]", strofreal(round(sum(wgt))))
 		  st_global( "_dta[N_strata]"   , "4")
 		  st_global( "_dta[strata]"     , (varlist[2] + " " + varlist[1]))
 		  st_global( "_dta[command]"    , "cic")
-		  st_global( "_dta[k_eq]"       , "4")
+		  if (did) st_global( "_dta[k_eq]", "5")
+		  else     st_global( "_dta[k_eq]", "4")
 		  st_global( "_dta[k_extra]"    , "0")
+
 		  for(b=1; b<=cols(bsdata); ++b) {
-			 st_global( (bstempvars[1,b]+"[observed]")  , strofreal((result.con,result.dci,result.dcilowbnd,result.dciuppbnd)[1,b]))
+			if (did) {
+				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')[1,b]))
+				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')[1,b]))
+			}
+			else {
+				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
+				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
+			}
 			 st_global( (bstempvars[1,b]+"[expression]"), ( "["+colfulllabels[b,1]+"]_b["+colfulllabels[b,2]+"]"))
 			 st_global( (bstempvars[1,b]+"[coleq]")     , colfulllabels[b,1])
 			 st_global( (bstempvars[1,b]+"[colname]")   , colfulllabels[b,2])
 			 st_global( (bstempvars[1,b]+"[is_eexp]")   , "1" )
 		  }
+
 		  // save as `bstempfile'
 		  bstempfile=st_tempfilename()
 		  st_local( "bstempfile",bstempfile)
@@ -502,7 +601,7 @@ draw_w_replacement(p00,1,1,1,rows(Y00),1,1,1,wgt)
 	} // done bootstrapping
 	else if (bsreps==-1) {
 _error( "Code for sedelta not written." )
-}
+	}
 	else if (bsreps==0) "Specify vce() option to calculate standard errors."
 	else _error( "bsreps invalid.")
 "end of cic_caller"
@@ -642,7 +741,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 
 
 // TRADITIONAL DIFFERENCES IN DIFFERENCES REGERSSION (OLS)
-struct did_ols_result did_ols(real colvector y, real matrix rhs, real colvector wgt, real scalar round, |string rowvector varlist)
+struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real colvector wgt, real scalar round, |string rowvector varlist)
 {
 	// Inputs:
 	// (1) y, the dependent variable
@@ -667,15 +766,15 @@ struct did_ols_result did_ols(real colvector y, real matrix rhs, real colvector 
 	didresult.coef = invsym(cross((treat_post,rhs),1,wgt,(treat_post,rhs),1))*cross((treat_post,rhs),1,wgt,y,0)
 
 	// Dependent variable (potentially adjusted for covariates or rounded)
-	if (cols(rhs)>=2) {
+	if (cols(rhs)>2) {
 		// adjust for covariates
 		//     yadj = _b[cons] + treat * _b[treat] + post * _b[post] + treat_post * _b[treat_post] + resid
 		// plug in
 		//     resid = y - (treat_post,rhs,J(rows(rhs),1,1))*result.coef
 		//           = y - (_b[cons] + treat * _b[treat] + post * _b[post] + treat_post * _b[treat_post] - controls * _b[controls])
 		// therefore,
-		//     yadj = y - X * _b[X]    (
-		// notice that control variables are columns 3 to cols(rhs) of the matrix rhs, but columns 3+1 to cols(rhs)+1 of the regression's independent variables (because interaction term was first variable)
+		//     yadj = y - X * _b[X]
+		// notice that control variables are columns 3 to cols(rhs) of the matrix rhs, but rows (3+1) to (cols(rhs)+1) of the regression's independent variables (because interaction term was first variable)
 		// also, rounds the output if round!=0
 		yadj = round(y - rhs[.,3..cols(rhs)]*didresult.coef[4..(cols(rhs)+1),1],round)
 		didresult.Y = &yadj
@@ -692,11 +791,12 @@ struct did_ols_result did_ols(real colvector y, real matrix rhs, real colvector 
 
 	// labels for didresult.coef
 	if (args()==5) {
-		didresult.coef_labels = (J(rows(didresult.coef),1,"did"),(("1."+varlist[2]+"#1."+varlist[3])\varlist[2..length(varlist)]'\"_cons"))
+		didresult.labels = (J(rows(didresult.coef),1,"did"),(("1."+varlist[2]+"#1."+varlist[3])\varlist[2..length(varlist)]'\"_cons"))
 	}
 
 	return(didresult)
 }
+
 
 // SAMPLE PROPORTIONS
 real vector prob(real vector Y, real vector YS, |real vector wgt)
@@ -708,7 +808,7 @@ real vector prob(real vector Y, real vector YS, |real vector wgt)
 	n = length(YS)
 	if (args()==3) {
 		// with weight variable
-		return(rowsum((abs((YS:-J(n,1,Y'))):<=epsilon(1)):*J(n,1,wgt')):/J(n,1,colsum(wgt)))
+		return(rowsum((abs((YS:-J(n,1,Y'))):<=epsilon(1)):*J(n,1,wgt')):/J(n,1,quadcolsum(wgt)))
 	}
 	else {
 		// with equal weights
@@ -752,6 +852,7 @@ real scalar cdfinv_brckt(real scalar p, real vector P, real vector YS)
 }
 
 
+/*
 // FOR BOOTSTRAPPING, DRAW RANDOM SAMPLE WITH REPLACEMENT
 real colvector drawsmpl(real colvector x, |real colvector wgt)
 {
@@ -767,7 +868,7 @@ real colvector drawsmpl(real colvector x, |real colvector wgt)
 		real colvector exp
 		real scalar i,j,w
 		N = sum(wgt) // assume weights are integers (I check this once in the main CIC function--before calling this sub-routine hundreds of times)
-// I thought it might be faster to just "expand" the dataset, then draw from it
+		             // I thought it might be faster to just "expand" the dataset, then draw from it
 		if (N <= 0) _error("Cannot draw sample when all weights are zero")
 		exp=J(N,1,.)
 		j=1
@@ -779,37 +880,101 @@ real colvector drawsmpl(real colvector x, |real colvector wgt)
 		return(exp[ceil(runiform(N,1):*N),1])
 	}
 }
-
+*/
 
 // FOR BOOTSTRAPPING, DRAW RANDOM SAMPLE WITH REPLACEMENT
-real colvector draw_w_replacement(real colvector p00, real colvector p01, real colvector p10, real colvector p11, real colvector n00, real colvector n01, real colvector n10, real colvector n11, | real colvector wgt)
+real colvector draw_w_replacement(real colvector p00, real colvector p01, real colvector p10, real colvector p11,
+                                  real scalar N00, real scalar N01, real scalar N10, real scalar N11,
+                                | real colvector cumsum00, real colvector cumsum01, real colvector cumsum10, real colvector cumsum11,
+                                  real scalar popsize00, real scalar popsize01, real scalar popsize10, real scalar popsize11)
 {
-	// Inputs: 1. Four (4) permutation vectors identifying rows of data in each group
-	//         2. Four (4) sample sizes with numbe of observations in each group
-	//         3. (Optional) vector with fweights/iweights for rows of data
-	// Ouput:  If no weights or fweights, a permutation vector idenifying rows of data (all four groups)
-	//         If iweights, a replacement weighting vector to replace wgt
-	real colvector out00, out01, out10, out11
+	// Case 1: Unweighted
+	// Inputs: 1-4.   Four (4) permutation vectors identifying the rows of data belonging to each group
+	//         5-8.   Four (4) scalars with the number of observations in each group (e.g., N00=rows(p00))
+	// Output: A frequency weight vector
+	//
+	// Case 2: Freqency or Importance Weights (fweights or iweights)
+	// Inputs: 1-8.   All the inputs provided in Case 1 (unweighted)
+	//         9-12.  Four (4) weight variables with cumulative sum of the weights from each group, normalized to sum to one within groups (e.g., cumsum00 = quadrunningsum(wgt[p00]); cumsum00 = cumsum00/cumsum00[N00])
+	//         13-16. Four (4) scalars with population size for each group.
+	//                  - With frequency weights, this is the weighted number of individuals in the group (e.g., popsize00 = cumsum00[n00])
+	//                  - With importance weights, use the fraction of popsize (e.g., popsize00 = round(cumsum00[N00]/colsum(wgt)*popsize))
+	// Output: A weight vector that replaces the input vector in cic_caller (wgt)
+	//
+	// This specialzed program was written to minimize processing time for CIC bootstrapping.
+	// The basic principle is that anything calculated more than once should be caclulated
+	// just once in cic_caller(), leaving only the tasks needed for each draw.
+	// Case 2 code was modeled on mm_upswr() in the moremata package (version 1.0.0 by Ben Jann).
+	real colvector u, reweight
+	real scalar i, j
+	reweight=J(N00+N01+N10+N11,1,0)
 
 	if (args()==8) {
 		// no weights, just a simple random draw from each group
-		out00 = p00[ceil(runiform(n00,1):*n00),1]
-		out01 = p01[ceil(runiform(n01,1):*n01),1]
-		out10 = p10[ceil(runiform(n10,1):*n10),1]
-		out11 = p11[ceil(runiform(n11,1):*n11),1]
-		return(out00 \ out01 \ out10 \ out11)
-	}
-	else {
-(p00, 	wgt[p00])[1..75,.]
-_error("Didn't program case with weights yet")
-	wgt[p01]
-	wgt[p10]
-	wgt[p11]
-	}	
+
+		// random draw of permutation vectors
+		u  = ( p00[ceil(runiform(N00,1):*N00),1] \
+		       p01[ceil(runiform(N01,1):*N01),1] \
+			   p10[ceil(runiform(N10,1):*N10),1] \
+			   p11[ceil(runiform(N11,1):*N11),1] )
+
+		// count number of times each row was drawn
+		for (i=1;i<=rows(u);i++) {
+			reweight[u[i]] = reweight[u[i]]+1
+		}
+	} // end unweighted section
+	
+	else if (args()==16) {
+		// fweights or iweights
+		real colvector r
+
+		// 1st group
+		u = sort(runiform(popsize00,1),1)   // random draw
+		r = J(N00,1,0)
+		j=1
+		for (i=1;i<=popsize00;i++) {
+			while (u[i]>cumsum00[j]) j++    // use cumulative distribution to get counts
+			r[j] = r[j]+1                   // r will contain the number of observations drawn for each row
+		}
+		reweight[p00] = r                   // return results for this group
+
+		// 2nd group
+		u = sort(runiform(popsize01,1),1)
+		r = J(N01,1,0)
+		j=1
+		for (i=1;i<=popsize01;i++) {
+			while (u[i]>cumsum01[j]) j++
+			r[j] = r[j]+1
+		}
+		reweight[p01] = r
+
+		// 3rd group
+		u = sort(runiform(popsize10,1),1)
+		r = J(N10,1,0)
+		j=1
+		for (i=1;i<=popsize10;i++) {
+			while (u[i]>cumsum10[j]) j++
+			r[j] = r[j]+1
+		}
+		reweight[p10] = r
+
+		// 4th group
+		u = sort(runiform(popsize11,1),1)
+		r = J(N11,1,0)
+		j=1
+		for (i=1;i<=popsize11;i++) {
+			while (u[i]>cumsum11[j]) j++
+			r[j] = r[j]+1
+		}
+		reweight[p11] = r
+
+	} // end weights section
+	else _error( "Expecting 8 arguments (unweighted) or 16 arguments (weighted), but received " + strofreal(args()) )
+	return(reweight)
 }
 
 
-// FOR BOOTSTRAPPING, USE 95 PERCENTILES OF BOOTSTRAP ITERATIONS TO BACKOUT STANDARD ERRORS
+// AFTER BSTAT STATA PROGRAM, USE 95 PERCENTILES OF BOOTSTRAP ITERATIONS TO BACKOUT STANDARD ERRORS
 void bs_se( string scalar in_ci, string scalar out_V )
 {
 	// Inputs: 1. Vector with
@@ -820,7 +985,6 @@ void bs_se( string scalar in_ci, string scalar out_V )
 	st_matrix(out_V,diag(bs_se:*bs_se))
 	st_matrixcolstripe(out_V,st_matrixcolstripe(in_ci))
 	st_matrixrowstripe(out_V,st_matrixcolstripe(in_ci))
-out_V
 }
 
 
@@ -852,9 +1016,82 @@ YS = (1\2\3\4\5)
 /* 4    = */ cdfinv_brckt(.9999, P, YS)
 /* 5    = */ cdfinv_brckt(1    , P, YS)
 
-YS
-drawsmpl(YS)
-drawsmpl(YS,(10\1\1\1\0))
+
+// YS
+// drawsmpl(YS)
+// drawsmpl(YS,(10\1\1\1\0))
+
+
+// check draw sample
+YS = (1\2\3\4\5\6\7\8)
+N00=N01=N10=N11=2
+for (i=1; i<=1000; i++) {
+	bs_draw = draw_w_replacement((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11)
+	if (i==1) bs_draw
+	if (i==1) avg = bs_draw'
+	else      avg = (avg \ bs_draw')
+}
+meanvariance(avg)'
+colmin(avg)'
+colmax(avg)'
+
+popsize=rows(YS)
+tempwgt = (1\9\1\9\1\9\1\9)
+cumsum00 = quadrunningsum(tempwgt[1\2])
+cumsum01 = quadrunningsum(tempwgt[3\4])
+cumsum10 = quadrunningsum(tempwgt[5\6])
+cumsum11 = quadrunningsum(tempwgt[7\8])
+popsize00 = round(cumsum00[N00]) // the number of obs. in each group is rounded to the nearest integer
+popsize01 = round(cumsum01[N01])
+popsize10 = round(cumsum10[N10])
+popsize11 = round(cumsum11[N11])
+cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
+cumsum01 = cumsum01/cumsum01[N01]
+cumsum10 = cumsum10/cumsum10[N10]
+cumsum11 = cumsum11/cumsum11[N11]
+
+cumsum00
+popsize00
+
+for (i=1; i<=1000; i++) {
+	bs_draw = draw_w_replacement((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+	if (i==1) bs_draw
+	if (i==1) avg = bs_draw'
+	else      avg = (avg \ bs_draw')
+}
+meanvariance(avg)'
+colmin(avg)'
+colmax(avg)'
+
+popsize=1000
+cumsum00 = quadrunningsum(tempwgt[1\2])
+cumsum01 = quadrunningsum(tempwgt[3\4])
+cumsum10 = quadrunningsum(tempwgt[5\6])
+cumsum11 = quadrunningsum(tempwgt[7\8])
+popsize00 = round(cumsum00[N00]/colsum(tempwgt)*popsize) // the number of obs. in each group is rounded to the nearest integer
+popsize01 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
+popsize10 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
+popsize11 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
+cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
+cumsum01 = cumsum01/cumsum01[N01]
+cumsum10 = cumsum10/cumsum10[N10]
+cumsum11 = cumsum11/cumsum11[N11]
+
+
+cumsum00
+popsize00
+
+for (i=1; i<=1000; i++) {
+	bs_draw = draw_w_replacement((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+	if (i==1) bs_draw
+	if (i==1) avg = bs_draw'
+	else      avg = (avg \ bs_draw')
+}
+meanvariance(avg)'
+colmin(avg)'
+colmax(avg)'
+
+
 
 mata describe
 mata memory
@@ -920,7 +1157,7 @@ program define cicgraph, sortpreserve
 			local thisname : word `i' of `names'
 			replace `eqn' = "`thiseqn'"  in `i'
 			replace `p'   = "`thisname'" in `i'
-			if regexm("`thisname'","^p([0-9]*)_?([0-9]*)") replace `pctile' = real(regexs(1)+"."+regexs(2)) in `i'
+			if regexm("`thisname'","^q([0-9]*)_?([0-9]*)") replace `pctile' = real(regexs(1)+"."+regexs(2)) in `i'
 		}
 
 		bys `eqn' (`p'): gen `mean'     = `coef'[1] if inlist(_n,1,_N)
@@ -1031,16 +1268,20 @@ log using cid_test_aid_data.log, replace
 
 mac list _Nreps _vce
 
-/* Temp stuff */
+* Temp stuff
 gen tempweight = 1
 bys high after: replace tempweight = 50 if _n<=20
 reg ly high##after age
-/* Temp stuff */
 
-* set trace on
-cap nois cic y high after age,  at(5(10)95)  did `vce' round(.1)
-cap nois cic y high after ,  did at(5(10)95) `vce'
-cap nois cic  ly high after age [fw=tempweight],  did at(5(10)95) `vce' round(.1)
+
+* Basic
+cap nois cic  y high after                    , did at(5(10)95) `vce'
+cic
+exit
+* With control variables
+cap nois cic  y high after age                , did at(5(10)95) `vce' round(.1)
+* With control variables and weights
+cap nois cic ly high after age [fw=tempweight], did at(5(10)95) `vce' round(.1)
 exit
 
 // Table 1
