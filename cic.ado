@@ -20,6 +20,8 @@ clear all
 *    treat_var                is a dummy that equals 1 for the treatment group
 *    post_var                 is a dummy that equals 1 for the period in which the treatment group is treated
 *    control_varlist          is a list of control variables (optional)
+*                                  This is implimented according to parametric approach outlined in section 5.1. of AI.
+*                                  "apply the CIC estimator to the residuals from an ordinary least squares regression with the effects of the dummy variables added back in."
 *
 *  and options are as follows:
 *
@@ -81,12 +83,15 @@ program define Estimate, eclass byable(recall)
 		[, at(numlist min=1 >=0 <=100 sort) ///
 		Vce(passthru) ///
 		did ///
+		Qdid ///
 		UNTreated ///
 		ROUnd(real 0) ///
 		level(passthru) notable NOHeader NOLegend * ] // Reporting options
 	marksample touse  // note that rows are dropped for (1) if/in (2) zero weight (3) missing data (and other reasons, see "help mark")
 	_get_diopts diopts, `options'
 	local diopts `diopts' `table' `header' `legend'
+	_rmcoll `varlist' [`weight'`exp'] if `touse', expand
+	local varlist `r(varlist)'
 
 	// first three variables need to be y, treat, and post
 	gettoken y     varlist : varlist
@@ -155,8 +160,9 @@ program define Estimate, eclass byable(recall)
 
 
 	// adjust y for covariates (OLS regression)
-	local runDID = (cond(("`did'"=="did") | (`: list sizeof varlist'!=0),1,0))
-if ( `runDID' ) regress `y' ib0.`treat'##ib0.`post' `varlist' if `touse' [`weight'`exp'], `diopts' `level'
+	local runDID  = (("`did'"=="did") | (`: list sizeof varlist'!=0))
+
+if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight'`exp'], `diopts' `level' nocons
 
 	// implement mata CIC routine
 	ereturn clear
@@ -213,7 +219,7 @@ if ( `runDID' ) regress `y' ib0.`treat'##ib0.`post' `varlist' if `touse' [`weigh
 	}
 	else {
 	 	ereturn scalar k_eq =  4
-		ereturn local  eqnames continuous discrete_ci dci_lower_bnd dci_upper_bnd 
+		ereturn local  eqnames continuous discrete_ci dci_lower_bnd dci_upper_bnd
 	}
 	if !missing("`untreated'")   ereturn local footnote "Effect of Treatment on the Treated Group"
 	else                         ereturn local footnote "Effect of Treatment on the Untreated Group"
@@ -287,6 +293,7 @@ struct cic_result {
 struct did_ols_result {
 	pointer(real colvector) Y
 	real colvector coef
+	real scalar did
 	string matrix labels
 }
 
@@ -320,21 +327,21 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 
 	// Read y, treat and post into mata
 	real colvector y, treat, post
-	real scalar N
 	varlist = tokens(varlist)
 	st_view(y    =.,.,varlist[1],touse_var)  // note that rows with missing data are already dropped by -marksample- in .ado file
-	N   = rows(y)
 	st_view(treat=.,.,varlist[2],touse_var)
 	st_view(post =.,.,varlist[3],touse_var)
 	if ((uniqrows(treat),uniqrows(post))!=(0,0\1,1)) {
 		_error( "treat and post must be dummy variables equal to 0 and 1" )
 	}
+	real scalar N
+	N   = rows(y)
 
 	// read control variables into mata (if need to run DID model)
 	if (length(varlist)>3 | did ) {
 		did = 1  // always run DID regression if control variables present
 		real matrix rhs
-		st_view(rhs =.,.,varlist[2..length(varlist)],touse_var)  // note that rows with missing data are already dropped by -marksample- in .ado file
+		st_view(rhs =.,.,invtokens(varlist[2..length(varlist)]),touse_var)  // note that rows with missing data are already dropped by -marksample- in .ado file
 	}
 
 	// read weights into mata (if there are any)
@@ -395,7 +402,7 @@ rows(uniqrows(*Y))
 	N00 = rows(p00);
 	N01 = rows(p01)
 	N10 = rows(p10)
-    N11 = rows(p11)
+	N11 = rows(p11)
 	if (min((N00,N01,N10,N11))<1) _error( "One or more of the four treat*post groups is empty.")
 	if (min((N00,N01,N10,N11))<2 & bsreps>0) _error( "One or more group has size less than 2. There will be no variation in bootstrap draws.")
 
@@ -419,22 +426,22 @@ rows(uniqrows(*Y))
 	// Call the main CIC routine
 	if (args()==8) result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
 	else           result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
-"end of cic()"
 
-	// return results into a Stata matrix named st_local("mata_b"),
-	// and Label the columns of the matrix
-	string matrix colfulllabels
-	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
-
+	// return results into a Stata matrix named st_local("mata_b") with lables
 	if (did) {
 		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
 		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
-	    colfulllabels = (colfulllabels \ didresult.labels)
+// there is notw a bs_didresult.did too
 	}
 	else {
 		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 	}
+
+	// matrix labels for cic() output
+	string matrix colfulllabels
+	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
+	if (did) colfulllabels = (colfulllabels \ didresult.labels)
 	st_matrixcolstripe(st_local("mata_b"), colfulllabels)
 	st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
 	st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
@@ -524,6 +531,11 @@ rows(uniqrows(*Y))
 		// Bootstrapping replications
 		for(b=1; b<=bsreps; ++b) {
 
+// TEST SPEED AND SEE IF THIS IS BETTER THAN THE METHOD BELOW
+// FOR CASE WHERE NO DID AND NO WEIGHTS
+// bs_cicresult=cic(drawsmpl(Y00),drawsmpl(Y01),drawsmpl(Y10),drawsmpl(Y11),at)
+// (if not, then delete the function below)
+
 			// Draw bootstrap sample
 			// draw_w_replacement() produces a vector with frequency weights in the unweighted case
 			// or a replacement weight vector (iweights or fweights) in the weighted case
@@ -535,6 +547,7 @@ rows(uniqrows(*Y))
 				bs_didresult = did_ols(y, rhs, bs_wgt, round, varlist)
 				swap(bs_Y,bs_didresult.Y)
 			}
+// there is notw a bs_didresult.did
 
 			// call cic() with bootstrap sample
 			bs_cicresult=cic((*bs_Y)[p00],(*bs_Y)[p01],(*bs_Y)[p10],(*bs_Y)[p11],at,bs_wgt[p00],bs_wgt[p01],bs_wgt[p10],bs_wgt[p11])
@@ -758,31 +771,34 @@ struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real col
 	// 2. a vector with coefficients from the DID regression
 	// 3. (if varlist provided) labels for coefficients compatible for st_matrixcolstripe()
 
-	struct did_ols_result scalar didresult
-	real colvector treat_post, yadj
+
+	// Nx4 matrix with dummies indicating group membership to p00, p01, p10, p11 (respectively)
+	real matrix D
+	D = ( ((-rhs[.,1]:+1):*(-rhs[.,2]:+1)), ((-rhs[.,1]:+1):*(rhs[.,2])), ((rhs[.,1]):*(-rhs[.,2]:+1)), ((rhs[.,1]):*(rhs[.,2])))
 
 	// OLS DID regression
-	treat_post = (rhs[.,1]:*rhs[.,2])
-	didresult.coef = invsym(cross((treat_post,rhs),1,wgt,(treat_post,rhs),1))*cross((treat_post,rhs),1,wgt,y,0)
+	struct did_ols_result scalar didresult
+	if (cols(rhs)==2) didresult.coef = invsym(quadcross(D,wgt,D))*quadcross(D,wgt,y)
+	else              didresult.coef = invsym(quadcross((D,rhs[.,3..cols(rhs)]),wgt,(D,rhs[.,3..cols(rhs)])))*quadcross((D,rhs[.,3..cols(rhs)]),wgt,y)
+
+	// DIFF-IN-DIFF estimate
+	didresult.did = didresult.coef[4] - didresult.coef[2] - didresult.coef[3] + didresult.coef[1]
 
 	// Dependent variable (potentially adjusted for covariates or rounded)
 	if (cols(rhs)>2) {
 		// adjust for covariates
-		//     yadj = _b[cons] + treat * _b[treat] + post * _b[post] + treat_post * _b[treat_post] + resid
-		// plug in
-		//     resid = y - (treat_post,rhs,J(rows(rhs),1,1))*result.coef
-		//           = y - (_b[cons] + treat * _b[treat] + post * _b[post] + treat_post * _b[treat_post] - controls * _b[controls])
-		// therefore,
 		//     yadj = y - X * _b[X]
-		// notice that control variables are columns 3 to cols(rhs) of the matrix rhs, but rows (3+1) to (cols(rhs)+1) of the regression's independent variables (because interaction term was first variable)
-		// also, rounds the output if round!=0
-		yadj = round(y - rhs[.,3..cols(rhs)]*didresult.coef[4..(cols(rhs)+1),1],round)
-		didresult.Y = &yadj
+		//          = D * _b[D] + resid    (yadj is also rounded if round!=0)
+		//
+		// notice that control variables are columns 3 to cols(rhs) of the matrix rhs,
+		// but are in rows 5 to rows(didresult.coef) of the regression's independent variables
+		// because the treat/post dummies (the first two variables in rhs) were turned
+		// into four group dummies in the regression
+		didresult.Y = &round( y - rhs[.,3..cols(rhs)]*didresult.coef[5..rows(didresult.coef),1] , round)
 	}
 	else if (round!=0) {
 		// no covariaters but need to round y
-		yadj=round(y,round)
-		didresult.Y = &yadj
+		didresult.Y = &round(y,round)
 	}
 	else {
 		// no covariaters or rounding, just point to input vector
@@ -791,7 +807,8 @@ struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real col
 
 	// labels for didresult.coef
 	if (args()==5) {
-		didresult.labels = (J(rows(didresult.coef),1,"did"),(("1."+varlist[2]+"#1."+varlist[3])\varlist[2..length(varlist)]'\"_cons"))
+		if (cols(rhs)==2) didresult.labels = (J(rows(didresult.coef),1,"did"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3])))
+		else              didresult.labels = (J(rows(didresult.coef),1,"did"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3]) \ varlist[4..length(varlist)]'))
 	}
 
 	return(didresult)
@@ -852,35 +869,14 @@ real scalar cdfinv_brckt(real scalar p, real vector P, real vector YS)
 }
 
 
-/*
 // FOR BOOTSTRAPPING, DRAW RANDOM SAMPLE WITH REPLACEMENT
-real colvector drawsmpl(real colvector x, |real colvector wgt)
+real colvector drawsmpl(real colvector x)
 {
-	// Inputs: 1. Vector we're drawing rows from
-	//         2. (Optional) Frequency weights
+	// Input:  Vector we're drawing rows from
 	// Output: Vector with a simple random sample
-	real scalar N
-	if (args()==1) {
-		N = rows(x)
-		return(x[ceil(runiform(N,1):*N),1])
-	}
-	else {
-		real colvector exp
-		real scalar i,j,w
-		N = sum(wgt) // assume weights are integers (I check this once in the main CIC function--before calling this sub-routine hundreds of times)
-		             // I thought it might be faster to just "expand" the dataset, then draw from it
-		if (N <= 0) _error("Cannot draw sample when all weights are zero")
-		exp=J(N,1,.)
-		j=1
-		for (i=1;i<=rows(x);i++) {
-			for (w=1;w<=wgt[i];w++) {
-				exp[j]=x[i,.]; j++
-			}
-		}
-		return(exp[ceil(runiform(N,1):*N),1])
-	}
+	return(x[ceil(runiform(rows(x),1):*rows(x)),1])
 }
-*/
+
 
 // FOR BOOTSTRAPPING, DRAW RANDOM SAMPLE WITH REPLACEMENT
 real colvector draw_w_replacement(real colvector p00, real colvector p01, real colvector p10, real colvector p11,
@@ -923,7 +919,7 @@ real colvector draw_w_replacement(real colvector p00, real colvector p01, real c
 			reweight[u[i]] = reweight[u[i]]+1
 		}
 	} // end unweighted section
-	
+
 	else if (args()==16) {
 		// fweights or iweights
 		real colvector r
@@ -974,7 +970,7 @@ real colvector draw_w_replacement(real colvector p00, real colvector p01, real c
 }
 
 
-// AFTER BSTAT STATA PROGRAM, USE 95 PERCENTILES OF BOOTSTRAP ITERATIONS TO BACKOUT STANDARD ERRORS
+// AFTER BSTAT STATA PROGRAM, USE 95 PERCENTILES OF BOOTSTRAP ITERATIONS TO BACK-OUT STANDARD ERRORS
 void bs_se( string scalar in_ci, string scalar out_V )
 {
 	// Inputs: 1. Vector with
@@ -1271,17 +1267,18 @@ mac list _Nreps _vce
 * Temp stuff
 gen tempweight = 1
 bys high after: replace tempweight = 50 if _n<=20
-reg ly high##after age
+
+egen agegroup = cut(age), at(0(10)100)
 
 
 * Basic
-cap nois cic  y high after                    , did at(5(10)95) `vce'
+cap nois cic  y high after                  , did at(5(10)95) `vce'
 cic
-exit
 * With control variables
-cap nois cic  y high after age                , did at(5(10)95) `vce' round(.1)
+cap nois cic  y high after i.agegroup         , did at(5(10)95) `vce' round(.1)
+exit
 * With control variables and weights
-cap nois cic ly high after age [fw=tempweight], did at(5(10)95) `vce' round(.1)
+cap nois cic ly high after i.agegroup [fw=tempweight], did at(5(10)95) `vce' round(.1)
 exit
 
 // Table 1
