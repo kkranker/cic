@@ -21,7 +21,7 @@ clear all
 *    post_var                 is a dummy that equals 1 for the period in which the treatment group is treated
 *    control_varlist          is a list of control variables (optional)
 *                                  This is implimented according to parametric approach outlined in section 5.1. of AI.
-*                                  "apply the CIC estimator to the residuals from an ordinary least squares regression with the effects of the dummy variables added back in."
+*                                  "apply the CIC estimator to the residuals from an ordinary least squares regression with the effects of the dummy variables added back in." (p. 466)
 *
 *  and options are as follows:
 *
@@ -60,6 +60,28 @@ clear all
 
 * Weights may be iweights or fweights.
 
+* vce(bootstrap, [bsopts]) is equivalent to
+*    . bootstrap _b, strata(treat post) [bsopts]: cic y treat post ... , vce(none)
+* but slower because vce(bootstrap) is implimented in META and runs with less overhead.
+* However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other options.
+* in documentation, talk about why bootstrap: prefix might be needed (longitudinal data, sample by id instead of pre/post groups)
+
+* When by is used, only the last group is saved in ereturn.
+
+
+
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+* TO DO
+* 1. SE option
+* 2. QDID
+* 3. Add arguments so you can run only some of the
+*    options (e.g., continuous only or discrete or qreg)
+* 4. byable(recall) working right?
+* 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+
+
 program cic, properties(mi) eclass byable(onecall)
 	version 11.2
 	if replay() {
@@ -71,6 +93,8 @@ program cic, properties(mi) eclass byable(onecall)
 	if _by() local BY `"by `_byvars'`_byrc0':"'
 	`BY' Estimate `0'
 	ereturn local cmdline `"cic `0'"'
+ 	ereturn local cmd     "cic"
+	ereturn local title   "Changes in Changes (CIC) Model"
 end
 
 //"
@@ -97,30 +121,6 @@ program define Estimate, eclass byable(recall)
 	gettoken y     varlist : varlist
 	gettoken treat varlist : varlist
 	gettoken post  varlist : varlist
-// byable(recall) working right?
-
-// _error( "also, switch bootstrap --> fullbootstrap and bspctile as a followup to bstat ")
-// error -- add check non-integer weights allowed with cic bootstrap
-// add documentation that *  fweights, but not iweights, work with vce( ??????????????? )
-// in documentation, talk about why bootstrap: prefix might be needed (longitudinal data, sample by id instead of pre/post groups)
-// vce(????) is equivalent to bootstrap:
-
-// vce(bootstrap, [bsopts]) is equivalent to
-//    . bootstrap _b, strata(treat post) [bsopts]: cic y treat post ... , vce(none)
-// but slower because vce(bootstrap) is implimented in META and runs with less overhead.
-// However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other variables.
-
-
-// nodots not working?
-
-
-// if control varaibles and bootstrap, produce an error.
-
-
-
-// add SE integration
-// add DID estimates?
-
 
 	// parse percentiles
 	if mi("`at'") local at "10(10)90" // default set (if undeclared)
@@ -208,11 +208,8 @@ if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight
 		ereturn post `mata_b' [`weight'`exp'], depname(`y') obs(`n') esample(`touse') dof(`=`n'-colsof(`mata_b')') `level'
 		ereturn display
 	}
- 	ereturn local cmd     "cic"
  	ereturn local depvar  "`y'"
- 	ereturn local cmdline `"cic `0'"'
  	ereturn local vce     "`vce'"
-	ereturn local title   "Changes in Changes (CIC) Model"
 	if (`: list sizeof varlist'!=0 | `runDID') {
 		ereturn scalar k_eq =  5
 		ereturn local  eqnames continuous discrete_ci dci_lower_bnd dci_upper_bnd did
@@ -221,10 +218,14 @@ if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight
 	 	ereturn scalar k_eq =  4
 		ereturn local  eqnames continuous discrete_ci dci_lower_bnd dci_upper_bnd
 	}
-	if !missing("`untreated'")   ereturn local footnote "Effect of Treatment on the Treated Group"
-	else                         ereturn local footnote "Effect of Treatment on the Untreated Group"
+	if "`untreated'"=="" ereturn local footnote "Effect of Treatment on the Treated Group"
+	else                 ereturn local footnote "Effect of Treatment on the Untreated Group"
 	di as txt "(" e(footnote) ")"
+
+mata: mata describe
+
 end // end of cic program definition
+
 
 // subroutine to replay estimates
 // this section is similar in function to the "_vce_parse" command, except that I set default values for reps() and strata()
@@ -379,8 +380,10 @@ sizeof(y)
 sizeof(Y)
 "sizeof(*Y)"
 sizeof(*Y)
-(*didresult.Y)[1..10]
-(*Y)[1..10]
+if (did) "(*didresult.Y)[1..10]"
+if (did)  (*didresult.Y)[1..10]
+"(*Y)[1..10]"
+ (*Y)[1..10]
 "rows in y"
 rows((y))
 "rows in *Y"
@@ -396,6 +399,7 @@ rows(uniqrows(*Y))
 	st_select(p01=.,(1::N),(treat:==0 :& post:==1))
 	st_select(p10=.,(1::N),(treat:==1 :& post:==0))
 	st_select(p11=.,(1::N),(treat:==1 :& post:==1))
+"Here OK 3"
 
 	// Number of observations
 	real scalar N00, N01, N10, N11
@@ -422,6 +426,7 @@ rows(uniqrows(*Y))
 //		st_select(W10=.,wgt,(treat:==1 :& post:==0))
 //		st_select(W11=.,wgt,(treat:==1 :& post:==1))
 //	}
+"Begin Main CIC call:"
 
 	// Call the main CIC routine
 	if (args()==8) result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
@@ -429,19 +434,18 @@ rows(uniqrows(*Y))
 
 	// return results into a Stata matrix named st_local("mata_b") with lables
 	if (did) {
-		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
-		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd,didresult.coef'))
-// there is notw a bs_didresult.did too
+		if (tot) st_matrix(st_local("mata_b"),  (didresult.coef',result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+		else     st_matrix(st_local("mata_b"), -(didresult.coef',result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 	}
 	else {
 		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 	}
 
-	// matrix labels for cic() output
+	// matrix labels for `mata_b'
 	string matrix colfulllabels
 	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
-	if (did) colfulllabels = (colfulllabels \ didresult.labels)
+	if (did) colfulllabels = (didresult.labels \ colfulllabels)
 	st_matrixcolstripe(st_local("mata_b"), colfulllabels)
 	st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
 	st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
@@ -466,7 +470,7 @@ rows(uniqrows(*Y))
 	}
 	st_numscalar( "e(N_support)",rows(uniqrows(*Y)))
 
-
+"start BS now:"
 	// Bootstrapping
 	if (bsreps>0) {
 		real scalar b
@@ -475,10 +479,9 @@ rows(uniqrows(*Y))
 		struct cic_result     scalar bs_cicresult
 
 		// pointer to y
-		// a second pointer is needed might adjust y for covariates with boostrap sample
+		// a new pointer is needed for dependent variable since it might be adjusted for covariates with boostrap sample
 		pointer(real colvector) scalar bs_Y
-		if (round!=0 & !did) bs_Y = &round(y,round)
-		else bs_Y = &y
+		bs_Y = Y
 
 		// empty matrix to store results
 		real matrix bsdata
@@ -531,31 +534,39 @@ rows(uniqrows(*Y))
 		// Bootstrapping replications
 		for(b=1; b<=bsreps; ++b) {
 
-// TEST SPEED AND SEE IF THIS IS BETTER THAN THE METHOD BELOW
-// FOR CASE WHERE NO DID AND NO WEIGHTS
-// bs_cicresult=cic(drawsmpl(Y00),drawsmpl(Y01),drawsmpl(Y10),drawsmpl(Y11),at)
-// (if not, then delete the function below)
+			if (args()!=8 | did) {
+if (b==1) "weights"
+				// if estimating DID model or have a weighted sample, the bootstrap sample
+				// is drawn by calculating a new weigting vector.
 
-			// Draw bootstrap sample
-			// draw_w_replacement() produces a vector with frequency weights in the unweighted case
-			// or a replacement weight vector (iweights or fweights) in the weighted case
-			if (args()==8) bs_wgt = draw_w_replacement(p00, p01, p10, p11, N00, N01, N10, N11)
-			else           bs_wgt = draw_w_replacement(p00, p01, p10, p11, N00, N01, N10, N11, cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+				// Draw bootstrap sample
+				// bs_draw_wgt() produces a vector with frequency weights in the unweighted case
+				// or a replacement weight vector (iweights or fweights) in the weighted case
 
-			// calculate DID and adjust for covariates w/ bootstrap sample
-			if (did) {
-				bs_didresult = did_ols(y, rhs, bs_wgt, round, varlist)
-				swap(bs_Y,bs_didresult.Y)
+				if (args()==8) bs_wgt = bs_draw_wgt(p00, p01, p10, p11, N00, N01, N10, N11)
+				else           bs_wgt = bs_draw_wgt(p00, p01, p10, p11, N00, N01, N10, N11, cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+
+				// calculate DID and adjust for covariates w/ bootstrap sample
+				if (did) {
+					bs_didresult = did_ols(y, rhs, bs_wgt, round, varlist)
+					swap(bs_Y,bs_didresult.Y)
+				}
+
+				// call cic() with bootstrap sample
+				bs_cicresult=cic((*bs_Y)[p00],(*bs_Y)[p01],(*bs_Y)[p10],(*bs_Y)[p11],at,bs_wgt[p00],bs_wgt[p01],bs_wgt[p10],bs_wgt[p11])
 			}
-// there is notw a bs_didresult.did
+			else {
 
-			// call cic() with bootstrap sample
-			bs_cicresult=cic((*bs_Y)[p00],(*bs_Y)[p01],(*bs_Y)[p10],(*bs_Y)[p11],at,bs_wgt[p00],bs_wgt[p01],bs_wgt[p10],bs_wgt[p11])
+if (b==1) "no weights"
+				// in the simple case of no regression adjustment and no weights, simply
+				// call cic() with a random draw of dependent variable
+				bs_cicresult=cic(bs_draw_nowgt((*bs_Y)[p00]),bs_draw_nowgt((*bs_Y)[p01]),bs_draw_nowgt((*bs_Y)[p10]),bs_draw_nowgt((*bs_Y)[p11]),at)
+			}
 
 			// save estimates into a matrix with one row per bootstrap sample
 			if (did) {
-				if (tot==1) bsdata[b,.]  =  (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')
-				else        bsdata[b,.]  = -(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')
+				if (tot==1) bsdata[b,.]  =  (bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+				else        bsdata[b,.]  = -(bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
 			}
 			else {
 				if (tot==1) bsdata[b,.]  =  (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
@@ -564,13 +575,14 @@ rows(uniqrows(*Y))
 
 			// show dots
 			if (dots) {
-				if (missing((bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd))) printf( "{err}x{txt}")
+				if (missing(bsdata[b,.])) printf( "{err}x{txt}")
 				else printf( ".")
 				if (!mod(b,50)) printf( " %5.0f\n",b)
 				displayflush()
 			}
 		} // end loop through bs iterations
 		if (dots & mod(b-1,50)) display("") // end of dots
+
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
 		  string rowvector bstempfile, bstempvars
@@ -593,8 +605,8 @@ rows(uniqrows(*Y))
 
 		  for(b=1; b<=cols(bsdata); ++b) {
 			if (did) {
-				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')[1,b]))
-				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd,bs_didresult.coef')[1,b]))
+				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
+				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
 			}
 			else {
 				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
@@ -618,6 +630,8 @@ _error( "Code for sedelta not written." )
 	else if (bsreps==0) "Specify vce() option to calculate standard errors."
 	else _error( "bsreps invalid.")
 "end of cic_caller"
+
+
 } // end of cic_caller; everthing is returned to Stata with st_*() commands.
 
 
@@ -627,11 +641,11 @@ _error( "Code for sedelta not written." )
 struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvector Y10, real colvector Y11, real rowvector at, | real colvector W00, real colvector W01, real colvector W10, real colvector W11 )
 {
 	// Inputs:
-	//   (1)-(4) Four column vectors with data.
-	//            - Y00 is control group in pre-period
-	//            - Y01 is control group in post period
-	//            - Y10 is treatment group in post period
-	//            - Y11 is treatment group in post period
+	//   (1)-(4) Four column vectors with dependent variable
+	//            - Y00 is data for the control group in pre-period
+	//            - Y01 is data for the control group in post period
+	//            - Y10 is data for the treatment group in post period
+	//            - Y11 is data for the treatment group in post period
 	//   (5)     Vector with k>=1 quantiles of interest, ranging from 0 to 1
 	//   (6)-(9) (Optional) Column with fweights or iweights for Y00, Y01, Y10, and Y11 (respectively)
 	//
@@ -839,9 +853,9 @@ real scalar cdf(real scalar y, real vector P, real vector YS)
 {
 	// given a cumulative distrubtion function (P) over the support points (YS),
 	// returns the empirical cumulative distribution function at a scalar (y)
-	if      (y< min(YS)) return(0)
-	else if (y>=max(YS)) return(1)
-	else                 return(P[colsum((YS:<=(y+epsilon(1))))])
+	if      (y< YS[1])          return(0)
+	else if (y>=YS[length(YS)]) return(1)
+	else                        return(P[colsum((YS:<=(y+epsilon(1))))])
 }
 
 
@@ -870,19 +884,21 @@ real scalar cdfinv_brckt(real scalar p, real vector P, real vector YS)
 
 
 // FOR BOOTSTRAPPING, DRAW RANDOM SAMPLE WITH REPLACEMENT
-real colvector drawsmpl(real colvector x)
+real colvector bs_draw_nowgt(real colvector x)
 {
 	// Input:  Vector we're drawing rows from
 	// Output: Vector with a simple random sample
+	// (This function is adequate when x is a vector,
+	// and when it is a permutatin vector)
 	return(x[ceil(runiform(rows(x),1):*rows(x)),1])
 }
 
 
 // FOR BOOTSTRAPPING, DRAW RANDOM SAMPLE WITH REPLACEMENT
-real colvector draw_w_replacement(real colvector p00, real colvector p01, real colvector p10, real colvector p11,
-                                  real scalar N00, real scalar N01, real scalar N10, real scalar N11,
-                                | real colvector cumsum00, real colvector cumsum01, real colvector cumsum10, real colvector cumsum11,
-                                  real scalar popsize00, real scalar popsize01, real scalar popsize10, real scalar popsize11)
+real colvector bs_draw_wgt(real colvector      p00, real colvector      p01, real colvector      p10, real colvector      p11,
+                           real scalar         N00, real scalar         N01, real scalar         N10, real scalar         N11,
+                         | real colvector cumsum00, real colvector cumsum01, real colvector cumsum10, real colvector cumsum11,
+                           real scalar   popsize00, real scalar   popsize01, real scalar   popsize10, real scalar   popsize11)
 {
 	// Case 1: Unweighted
 	// Inputs: 1-4.   Four (4) permutation vectors identifying the rows of data belonging to each group
@@ -1014,15 +1030,15 @@ YS = (1\2\3\4\5)
 
 
 // YS
-// drawsmpl(YS)
-// drawsmpl(YS,(10\1\1\1\0))
+// bs_draw_nowgt(YS)
+// bs_draw_nowgt(YS,(10\1\1\1\0))
 
 
 // check draw sample
 YS = (1\2\3\4\5\6\7\8)
 N00=N01=N10=N11=2
 for (i=1; i<=1000; i++) {
-	bs_draw = draw_w_replacement((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11)
+	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11)
 	if (i==1) bs_draw
 	if (i==1) avg = bs_draw'
 	else      avg = (avg \ bs_draw')
@@ -1050,7 +1066,7 @@ cumsum00
 popsize00
 
 for (i=1; i<=1000; i++) {
-	bs_draw = draw_w_replacement((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
 	if (i==1) bs_draw
 	if (i==1) avg = bs_draw'
 	else      avg = (avg \ bs_draw')
@@ -1078,7 +1094,7 @@ cumsum00
 popsize00
 
 for (i=1; i<=1000; i++) {
-	bs_draw = draw_w_replacement((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
 	if (i==1) bs_draw
 	if (i==1) avg = bs_draw'
 	else      avg = (avg \ bs_draw')
@@ -1212,7 +1228,7 @@ set tracedepth 3
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 20
+local Nreps = 50
 if 01     	local vce vce(bootstrap, reps(`Nreps'))
 else       	macro drop _vce
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -1266,19 +1282,37 @@ mac list _Nreps _vce
 
 * Temp stuff
 gen tempweight = 1
-bys high after: replace tempweight = 50 if _n<=20
+replace tempweight = 2 in 1
+// bys high after: replace tempweight = 50 if _n<=20
 
 egen agegroup = cut(age), at(0(10)100)
 
 
 * Basic
-cap nois cic  y high after                  , did at(5(10)95) `vce'
-cic
+timer on 21
+cic  y high after, at(5(10)95) `vce'
+timer off 21
+
 * With control variables
-cap nois cic  y high after i.agegroup         , did at(5(10)95) `vce' round(.1)
-exit
+timer on 22
+cap nois cic  y high after i.agegroup, did `vce' round(.25)
+timer off 22
+
+* Test recall
+cic
+cicgraph , name(r0)
+
+* With weights
+timer on 23
+cap nois cic ly high after [fw=tempweight], did  `vce'
+timer off 23
+
 * With control variables and weights
-cap nois cic ly high after i.agegroup [fw=tempweight], did at(5(10)95) `vce' round(.1)
+timer on 24
+cap nois cic ly high after i.agegroup [fw=tempweight], did `vce' round(.25)
+timer off 24
+timer list
+
 exit
 
 // Table 1
@@ -1402,6 +1436,8 @@ replace d = 0.80 - 0.4 * y if t==1 & p==0
 replace d = 0.50 - 1.0 * y if t==1 & p==1
 replace d = round(d,.01)
 cic d treat post,  at(10(10)90) vce(b)
+
+exit
 
 *set trace on
 cicgraph , name(r1)
