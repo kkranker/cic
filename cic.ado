@@ -73,11 +73,12 @@ clear all
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 * TO DO
 * 1. SE option
-* 2. QDID
+* 2. QDID - add labels and return to e(b) and 
 * 3. Add arguments so you can run only some of the
 *    options (e.g., continuous only or discrete or qreg)
 * 4. byable(recall) working right?
 * 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
+* 6. look at qreg and make similar matrix labels
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 
@@ -177,7 +178,6 @@ if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight
 		gen `untreat' = (`treat'==0)
 		mata: cic_caller( "`y' `untreat' `post' `varlist'", "`touse'", "at", `runDID', 0, `bsreps', `dots', `round' `wtexp_caller')
 	}
-
 
 	// post results to ereturn
 	di as txt _n "Changes in Changes (CIC) Model"
@@ -295,7 +295,7 @@ struct did_ols_result {
 	pointer(real colvector) Y
 	real colvector coef
 	real scalar did
-	string matrix labels
+	string matrix labels, didlabel
 }
 
 
@@ -399,7 +399,6 @@ rows(uniqrows(*Y))
 	st_select(p01=.,(1::N),(treat:==0 :& post:==1))
 	st_select(p10=.,(1::N),(treat:==1 :& post:==0))
 	st_select(p11=.,(1::N),(treat:==1 :& post:==1))
-"Here OK 3"
 
 	// Number of observations
 	real scalar N00, N01, N10, N11
@@ -409,6 +408,16 @@ rows(uniqrows(*Y))
 	N11 = rows(p11)
 	if (min((N00,N01,N10,N11))<1) _error( "One or more of the four treat*post groups is empty.")
 	if (min((N00,N01,N10,N11))<2 & bsreps>0) _error( "One or more group has size less than 2. There will be no variation in bootstrap draws.")
+
+	// Call the quantile DID routine
+	if (did) {
+		real rowvector qdid_result
+		if (args()==8) qdid_result=qdid((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
+		else           qdid_result=qdid((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
+	}
+"Output from qdid is saved in qdid_result"
+"Need to add labels and return qdid_result to e(b)"
+qdid_result
 
 
 //	// Select the rows belonging to the treat*post groups
@@ -434,8 +443,8 @@ rows(uniqrows(*Y))
 
 	// return results into a Stata matrix named st_local("mata_b") with lables
 	if (did) {
-		if (tot) st_matrix(st_local("mata_b"),  (didresult.coef',result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
-		else     st_matrix(st_local("mata_b"), -(didresult.coef',result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+		if (tot) st_matrix(st_local("mata_b"),  (didresult.coef',didresult.did,result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+		else     st_matrix(st_local("mata_b"), -(didresult.coef',didresult.did,result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 	}
 	else {
 		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
@@ -445,7 +454,7 @@ rows(uniqrows(*Y))
 	// matrix labels for `mata_b'
 	string matrix colfulllabels
 	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
-	if (did) colfulllabels = (didresult.labels \ colfulllabels)
+	if (did) colfulllabels = (didresult.labels \ didresult.didlabel \ colfulllabels )
 	st_matrixcolstripe(st_local("mata_b"), colfulllabels)
 	st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
 	st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
@@ -485,7 +494,7 @@ rows(uniqrows(*Y))
 
 		// empty matrix to store results
 		real matrix bsdata
-		if (did) bsdata=J(bsreps,4*(1+length(at))+length(didresult.coef),.)
+		if (did) bsdata=J(bsreps,4*(1+length(at))+length(didresult.coef)+1,.)
 		else     bsdata=J(bsreps,4*(1+length(at)),.)
 
 		// Before loop, extra setup needed for drawing a sample with unequal weights
@@ -565,8 +574,8 @@ if (b==1) "no weights"
 
 			// save estimates into a matrix with one row per bootstrap sample
 			if (did) {
-				if (tot==1) bsdata[b,.]  =  (bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
-				else        bsdata[b,.]  = -(bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+				if (tot==1) bsdata[b,.]  =  (bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+				else        bsdata[b,.]  = -(bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
 			}
 			else {
 				if (tot==1) bsdata[b,.]  =  (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
@@ -578,10 +587,11 @@ if (b==1) "no weights"
 				if (missing(bsdata[b,.])) printf( "{err}x{txt}")
 				else printf( ".")
 				if (!mod(b,50)) printf( " %5.0f\n",b)
+				else if (b==bsreps & mod(b-1,50)) display("") // end of dots
 				displayflush()
 			}
 		} // end loop through bs iterations
-		if (dots & mod(b-1,50)) display("") // end of dots
+"done with bootstrapping loosps"
 
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
@@ -599,14 +609,14 @@ if (b==1) "no weights"
 		  st_global( "_dta[N_strata]"   , "4")
 		  st_global( "_dta[strata]"     , (varlist[2] + " " + varlist[1]))
 		  st_global( "_dta[command]"    , "cic")
-		  if (did) st_global( "_dta[k_eq]", "5")
+		  if (did) st_global( "_dta[k_eq]", "6")
 		  else     st_global( "_dta[k_eq]", "4")
 		  st_global( "_dta[k_extra]"    , "0")
 
 		  for(b=1; b<=cols(bsdata); ++b) {
 			if (did) {
-				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
-				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_didresult.coef',bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
+				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
+				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
 			}
 			else {
 				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
@@ -653,8 +663,8 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	//   Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
 	//   (1) result.con       = CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
 	//   (2) result.dci       = CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
-	//   (3) result.dcilowbnd = DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
-	//   (4) result.dciuppbnd = DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
+	//   (3) result.dcilowbnd = LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	//   (4) result.dciuppbnd = UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 
 	// The code in cic() is somewhat convoluted because I am
 	// calculating all four vectors simultaneously.
@@ -741,7 +751,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	}
 
 
-	// DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
+	// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 	// calculate the discreate outcomes CIC estimator
 	// conditional independence estimate
 	result.dcilowbnd =( (F11-(0 \ F11[1..(length(YS)-1)]))'*YS - (FLB-(0 \ FLB[1..(length(YS01)-1)]))'*YS01 )
@@ -751,7 +761,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 	}
 
 
-	// DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
+	// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 	// calculate the discreate outcomes CIC estimator
 	// matrix has mean estimate in first column, plus one column for each element of "at"
 	// conditional independence estimate
@@ -821,11 +831,48 @@ struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real col
 
 	// labels for didresult.coef
 	if (args()==5) {
-		if (cols(rhs)==2) didresult.labels = (J(rows(didresult.coef),1,"did"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3])))
-		else              didresult.labels = (J(rows(didresult.coef),1,"did"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3]) \ varlist[4..length(varlist)]'))
+		if (cols(rhs)==2) didresult.labels = (J(rows(didresult.coef),1,"did_model"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3])))
+		else              didresult.labels = (J(rows(didresult.coef),1,"did_model"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3]) \ varlist[4..length(varlist)]'))
 	}
+	// labels for didresult.coef
+	didresult.didlabel = ( "did", "did" )
 
 	return(didresult)
+}
+
+
+// QUANTILE DID MODEL, EQUATION 22
+real rowvector qdid(real colvector Y00, real colvector Y01, real colvector Y10, real colvector Y11, real rowvector at, | real colvector W00, real colvector W01, real colvector W10, real colvector W11 )
+{
+	// Inputs:
+	//   (1)-(4) Four column vectors with dependent variable
+	//            - Y00 is data for the control group in pre-period
+	//            - Y01 is data for the control group in post period
+	//            - Y10 is data for the treatment group in post period
+	//            - Y11 is data for the treatment group in post period
+	//   (5)     Vector with k>=1 quantiles of interest, ranging from 0 to 1
+	//   (6)-(9) (Optional) Column with fweights or iweights for Y00, Y01, Y10, and Y11 (respectively)
+	//
+	// Output: Vector with (k) elements. (one for each quantile in -at-).
+	real rowvector qdid; qdid = J(1,length(at),.)
+	real scalar i
+
+	// Need all or none of args (6)-(9)
+	if (args()>5 & args()!=9) _error(( "Expected 5 or 9 arguements, but received " + strofreal(args())))
+
+	if (args()==5) {
+		// No weights
+		for(i=1; i<=length(at); ++i) {
+			qdid[i] = cumdfinv(Y11,at[i])-cumdfinv(Y10:+mean(Y01):-mean(Y00),at[i])
+		}
+	}
+	else {
+		// With weights
+		for(i=1; i<=length(at); ++i) {
+			qdid[i] = cumdfinv(Y11,at[1,i],W11)-cumdfinv(Y10:+mean(Y01,W01):-mean(Y00,W00),at[1,i],W10)
+		}
+	}
+	return(qdid)
 }
 
 
@@ -842,7 +889,7 @@ real vector prob(real vector Y, real vector YS, |real vector wgt)
 		return(rowsum((abs((YS:-J(n,1,Y'))):<=epsilon(1)):*J(n,1,wgt')):/J(n,1,quadcolsum(wgt)))
 	}
 	else {
-		// with equal weights
+		// without weights
 		return(rowsum(abs((YS:-J(n,1,Y'))):<=epsilon(1)):/length(Y))
 	}
 }
@@ -871,7 +918,7 @@ real scalar cdfinv(real scalar p, real vector P, real vector YS)
 // INVERSE OF CUMULATIVE DISTRIBUTION FUNCTION, ALTERNATIVE FOR DISCREATE OUTCOMES, EQUATION 24
 real scalar cdfinv_brckt(real scalar p, real vector P, real vector YS)
 {
-	// given a cumulative distrubtion functin (P) over the support points (YS),
+	// given a cumulative distribution function (P) over the support points (YS),
 	// returns the inverse of the empirical cumulative distribution function at probability p (0<p<1)
 	// but if equals -oo, it returns min(YS)-100*(1+max(YS)-YS(min)) = 101*min(YS)-100*max(YS)-100
 	if (p>=(P[1]-epsilon(1))) {
@@ -879,6 +926,43 @@ real scalar cdfinv_brckt(real scalar p, real vector P, real vector YS)
 	}
 	else {
 		return(101*YS[1]-100*YS[length(YS)]-100)
+	}
+}
+
+
+// EMPIRICAL DISTRIBUTION FUNCTION
+real scalar cumdfinv(real colvector X, real scalar p, |real colvector wgt)
+{
+	// given a vector of observations (X),
+	// returns the empirical distribution of X evaluated at a point (p).
+	// optionally, the vector X can have weights (wgt)
+	if      (p<=epsilon(1))   return(min(X))
+	else if (p>=1-epsilon(1)) return(max(X))
+	else if (args()==2) {
+		// without weights
+		return(sort(X,1)[floor(length(X)*p+1-epsilon(1)),1])
+
+		// Note that floor(length(X)*p+1-epsilon(1)) is smallest integer larger than length(X)*p
+		// e.g., if length(X)=10, p=0.34 then floor(3.4+1-2.2e-16)=4
+		//       if length(X)=10, p=0.30 then floor(3.0+1-2.2e-16)=3
+	}
+	else {
+		// with weights
+		real matrix xs, sum_wgt
+		xs = sort((X,wgt),1)
+		sum_wgt = runningsum(xs[.,2]) :/ colsum(xs[.,2])
+		sum_wgt[rows(xs),1]=1 // total of weight column is sum_wgt[rows(xs),1], set to 1
+
+		// return the observation from fist row
+		// where sum_wgt larger than p
+		return(xs[colmax(select((1::rows(xs)),(sum_wgt:<=p))),1])
+
+		// The weighted e.c.d.f. (empirical cumulative distribution function) Fn is defined so that,
+		// for any real number y, the value of Fn(y) is equal to the total weight of all entries of x
+		// that are less than or equal to y. That is Fn(y) = sum(weights[x <= y]).
+		// Thus Fn is a step function which jumps at the values of x. The height of the jump at a point
+		// y is the total weight of all entries in x number of tied observations at that value.
+		// cumdfinv() returns the inverse of Fn()
 	}
 }
 
@@ -1228,7 +1312,7 @@ set tracedepth 3
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 50
+local Nreps = 15
 if 01     	local vce vce(bootstrap, reps(`Nreps'))
 else       	macro drop _vce
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -1285,12 +1369,12 @@ gen tempweight = 1
 replace tempweight = 2 in 1
 // bys high after: replace tempweight = 50 if _n<=20
 
-egen agegroup = cut(age), at(0(10)100)
+egen agegroup = cut(age), group(7)
 
 
 * Basic
 timer on 21
-cic  y high after, at(5(10)95) `vce'
+cic  y high after, at(5(10)95) `vce' did
 timer off 21
 
 * With control variables
@@ -1518,10 +1602,10 @@ struct cic_result scalar cic_seperate(real colvector Y00, real colvector Y01, re
 	// CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
 	result.dci = cic_dci(F00,F01,F10,F11,YS,YS01,at)
 
-	// DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
+	// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 	result.dcilowbnd = cic_lower(F00,F01,F10,F11,YS,YS01,at)
 
-	// DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
+	// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 	result.dciuppbnd = cic_upper(F00,F01,F10,F11,YS,YS01,at)
 
 	// DONE.  RETURN STRUCTURE W/ FOUR ROW VECTORS.
@@ -1603,7 +1687,7 @@ real vector cic_dci(real vector F00, real vector F01, real vector F10, real vect
 }
 
 
-// DISCRETE CIC MODEL LOWER BOUND, EQUATION 25
+// LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 real vector cic_lower(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
 {
 	// this function calculates the discreate outcomes CIC estimator
@@ -1635,7 +1719,7 @@ real vector cic_lower(real vector F00, real vector F01, real vector F10, real ve
 }
 
 
-// DISCRETE CIC MODEL UPPER BOUND, EQUATION 25
+// UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 real vector cic_upper(real vector F00, real vector F01, real vector F10, real vector F11, real vector YS, real vector YS01, real vector at)
 {
 	// this function calculates the discreate outcomes CIC estimator
