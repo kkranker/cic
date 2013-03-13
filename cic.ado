@@ -73,7 +73,7 @@ clear all
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 * TO DO
 * 1. SE option
-* 2. QDID - add labels and return to e(b) and 
+* 2. QDID - add labels and return to e(b) and
 * 3. Add arguments so you can run only some of the
 *    options (e.g., continuous only or discrete or qreg)
 * 4. byable(recall) working right?
@@ -286,6 +286,7 @@ mata set matafavor speed
 
 
 mata set matalnum on /* drop this later */
+
 
 // STRUCTURES FOR RETURNING RESULTS
 struct cic_result {
@@ -902,7 +903,7 @@ real scalar cdf(real scalar y, real vector P, real vector YS)
 	// returns the empirical cumulative distribution function at a scalar (y)
 	if      (y< YS[1])          return(0)
 	else if (y>=YS[length(YS)]) return(1)
-	else                        return(P[colsum((YS:<=(y+epsilon(1))))])
+	else                        return(P[colsum((YS:<=(y+epsilon(y))))])
 }
 
 
@@ -911,7 +912,7 @@ real scalar cdfinv(real scalar p, real vector P, real vector YS)
 {
 	// given a cumulative distrubtion functin (P) over the support points (YS),
 	// returns the inverse of the empirical cumulative distribution function at probability p (0<p<1)
-	return(YS[min((length(YS)\select((1::length(YS)),(P:>=(p-epsilon(1))))))])
+	return(YS[min((length(YS)\select((1::length(YS)),(P:>=(p-epsilon(p))))))])
 }
 
 
@@ -922,7 +923,7 @@ real scalar cdfinv_brckt(real scalar p, real vector P, real vector YS)
 	// returns the inverse of the empirical cumulative distribution function at probability p (0<p<1)
 	// but if equals -oo, it returns min(YS)-100*(1+max(YS)-YS(min)) = 101*min(YS)-100*max(YS)-100
 	if (p>=(P[1]-epsilon(1))) {
-		return(YS[max(select((1::length(YS)),(P:<=(p+epsilon(1)))))])
+		return(YS[max(select((1::length(YS)),(P:<=(p+epsilon(p)))))])
 	}
 	else {
 		return(101*YS[1]-100*YS[length(YS)]-100)
@@ -936,13 +937,15 @@ real scalar cumdfinv(real colvector X, real scalar p, |real colvector wgt)
 	// given a vector of observations (X),
 	// returns the empirical distribution of X evaluated at a point (p).
 	// optionally, the vector X can have weights (wgt)
-	if      (p<=epsilon(1))   return(min(X))
+	if      (p<=epsilon(p))   return(min(X))
 	else if (p>=1-epsilon(1)) return(max(X))
 	else if (args()==2) {
 		// without weights
-		return(sort(X,1)[floor(length(X)*p+1-epsilon(1)),1])
+		real scalar r
+		r = length(X)*p
+		return(sort(X,1)[floor(r+1-epsilon(r)),1])
 
-		// Note that floor(length(X)*p+1-epsilon(1)) is smallest integer larger than length(X)*p
+		// Note that floor(r+1-epsilon(r)) is smallest integer larger than length(X)*p
 		// e.g., if length(X)=10, p=0.34 then floor(3.4+1-2.2e-16)=4
 		//       if length(X)=10, p=0.30 then floor(3.0+1-2.2e-16)=3
 	}
@@ -951,18 +954,10 @@ real scalar cumdfinv(real colvector X, real scalar p, |real colvector wgt)
 		real matrix xs, sum_wgt
 		xs = sort((X,wgt),1)
 		sum_wgt = runningsum(xs[.,2]) :/ colsum(xs[.,2])
-		sum_wgt[rows(xs),1]=1 // total of weight column is sum_wgt[rows(xs),1], set to 1
+		sum_wgt[rows(xs),1]=1 // force sum of weights to 1
 
-		// return the observation from fist row
-		// where sum_wgt larger than p
-		return(xs[colmax(select((1::rows(xs)),(sum_wgt:<=p))),1])
-
-		// The weighted e.c.d.f. (empirical cumulative distribution function) Fn is defined so that,
-		// for any real number y, the value of Fn(y) is equal to the total weight of all entries of x
-		// that are less than or equal to y. That is Fn(y) = sum(weights[x <= y]).
-		// Thus Fn is a step function which jumps at the values of x. The height of the jump at a point
-		// y is the total weight of all entries in x number of tied observations at that value.
-		// cumdfinv() returns the inverse of Fn()
+		// return the observation from fist row where cumulative sum of wgt is larger than p
+		return(xs[colmin(select((1::rows(xs)),(sum_wgt:>=p) )),1])
 	}
 }
 
@@ -1177,7 +1172,7 @@ cumsum11 = cumsum11/cumsum11[N11]
 cumsum00
 popsize00
 
-for (i=1; i<=1000; i++) {
+for (i=1; i<=100; i++) {
 	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
 	if (i==1) bs_draw
 	if (i==1) avg = bs_draw'
@@ -1187,11 +1182,17 @@ meanvariance(avg)'
 colmin(avg)'
 colmax(avg)'
 
+cumdfinv((1::10), .94          )
+cumdfinv((1::10), .94,          J(10,1,1))
+cumdfinv((1::10), .9           )
+cumdfinv((1::10), .9 ,          J(10,1,1))
 
+cumdfinv((1::9) , .94          ,(2\J(8,1,1)))
+cumdfinv((1::9) , .84          ,(J(8,1,1)\2))
+cumdfinv((1::9) , .9           ,(2\J(8,1,1)))
+cumdfinv((1::9) , .8           ,(J(8,1,1)\2))
 
 mata describe
-mata memory
-
 
 end
 /* * * * *  END OF MATA BLOCK * * * * */
