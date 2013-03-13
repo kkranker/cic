@@ -73,12 +73,10 @@ clear all
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 * TO DO
 * 1. SE option
-* 2. QDID - add labels and return to e(b) and
 * 3. Add arguments so you can run only some of the
 *    options (e.g., continuous only or discrete or qreg)
 * 4. byable(recall) working right?
 * 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
-* 6. look at qreg and make similar matrix labels
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 
@@ -292,11 +290,10 @@ mata set matalnum on /* drop this later */
 struct cic_result {
 	real rowvector con, dci, dcilowbnd, dciuppbnd
 }
-struct did_ols_result {
+struct did_result {
 	pointer(real colvector) Y
 	real colvector coef
 	real scalar did
-	string matrix labels, didlabel
 }
 
 
@@ -361,7 +358,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 
 	// Results will be returned into a structures (defined above)
 	struct cic_result scalar result
-	struct did_ols_result scalar didresult
+	struct did_result scalar didresult
 
 	// DID regression
 	// After this section, upper-case Y is now the dependent variable for
@@ -370,7 +367,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	pointer(real colvector) scalar Y
 	Y = &y
 	if (did) {
-		didresult = did_ols(y, rhs, wgt, round, varlist)
+		didresult = did(y, rhs, wgt, round, varlist)
 		swap(Y,didresult.Y)
 	}
 	else if (round!=0) Y = &round(y,round)
@@ -416,10 +413,6 @@ rows(uniqrows(*Y))
 		if (args()==8) qdid_result=qdid((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
 		else           qdid_result=qdid((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
 	}
-"Output from qdid is saved in qdid_result"
-"Need to add labels and return qdid_result to e(b)"
-qdid_result
-
 
 //	// Select the rows belonging to the treat*post groups
 //	real colvector Y00, Y01, Y10, Y11
@@ -444,21 +437,27 @@ qdid_result
 
 	// return results into a Stata matrix named st_local("mata_b") with lables
 	if (did) {
-		if (tot) st_matrix(st_local("mata_b"),  (didresult.coef',didresult.did,result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
-		else     st_matrix(st_local("mata_b"), -(didresult.coef',didresult.did,result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+		if (tot) st_matrix(st_local("mata_b"),  (didresult.coef',didresult.did,qdid_result,result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+		else     st_matrix(st_local("mata_b"), -(didresult.coef',didresult.did,qdid_result,result.con,result.dci,result.dciuppbnd,result.dcilowbnd))
 	}
 	else {
 		if (tot) st_matrix(st_local("mata_b"),  (result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
-		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
+		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dciuppbnd,result.dcilowbnd))
 	}
 
 	// matrix labels for `mata_b'
-	string matrix colfulllabels
-	colfulllabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
-	if (did) colfulllabels = (didresult.labels \ didresult.didlabel \ colfulllabels )
-	st_matrixcolstripe(st_local("mata_b"), colfulllabels)
-	st_local("cic_coleq"   ,invtokens(colfulllabels[.,1]'))
-	st_local("cic_colnames",invtokens(colfulllabels[.,2]'))
+	string matrix ciclabels, didlabels, qdidlabels
+	ciclabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
+	if (did) {
+		if (cols(rhs)==2) didlabels = (J(rows(didresult.coef),1,"did_model"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3])))
+		else              didlabels = (J(rows(didresult.coef),1,"did_model"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3]) \ varlist[4..length(varlist)]'))
+		qdidlabels=(J(length(at),1,"qdid"),strtoname("q":+strofreal(at*100))')
+
+		ciclabels = ( didlabels \ ( "did", "did" ) \ qdidlabels \ ciclabels )
+	}
+	st_matrixcolstripe(st_local("mata_b"), ciclabels)
+	st_local("cic_coleq"   ,invtokens(ciclabels[.,1]'))
+	st_local("cic_colnames",invtokens(ciclabels[.,2]'))
 
 	// return
 	st_matrix("e(at)",at)
@@ -485,8 +484,9 @@ qdid_result
 	if (bsreps>0) {
 		real scalar b
 		real colvector bs_wgt
-		struct did_ols_result scalar bs_didresult
-		struct cic_result     scalar bs_cicresult
+		struct did_result scalar bs_didresult
+		struct cic_result scalar bs_cicresult
+		real rowvector bs_qdidresult
 
 		// pointer to y
 		// a new pointer is needed for dependent variable since it might be adjusted for covariates with boostrap sample
@@ -495,7 +495,7 @@ qdid_result
 
 		// empty matrix to store results
 		real matrix bsdata
-		if (did) bsdata=J(bsreps,4*(1+length(at))+length(didresult.coef)+1,.)
+		if (did) bsdata=J(bsreps,4*(1+length(at))+length(didresult.coef)+1+length(qdid_result),.)
 		else     bsdata=J(bsreps,4*(1+length(at)),.)
 
 		// Before loop, extra setup needed for drawing a sample with unequal weights
@@ -545,29 +545,22 @@ qdid_result
 		for(b=1; b<=bsreps; ++b) {
 
 			if (args()!=8 | did) {
-if (b==1) "weights"
 				// if estimating DID model or have a weighted sample, the bootstrap sample
-				// is drawn by calculating a new weigting vector.
-
-				// Draw bootstrap sample
-				// bs_draw_wgt() produces a vector with frequency weights in the unweighted case
-				// or a replacement weight vector (iweights or fweights) in the weighted case
-
+				// is "drawn" by creating a new weight vector.
 				if (args()==8) bs_wgt = bs_draw_wgt(p00, p01, p10, p11, N00, N01, N10, N11)
 				else           bs_wgt = bs_draw_wgt(p00, p01, p10, p11, N00, N01, N10, N11, cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
 
 				// calculate DID and adjust for covariates w/ bootstrap sample
 				if (did) {
-					bs_didresult = did_ols(y, rhs, bs_wgt, round, varlist)
+					bs_didresult = did(y, rhs, bs_wgt, round, varlist)
 					swap(bs_Y,bs_didresult.Y)
+					bs_qdidresult = qdid((*bs_Y)[p00],(*bs_Y)[p01],(*bs_Y)[p10],(*bs_Y)[p11],at,bs_wgt[p00],bs_wgt[p01],bs_wgt[p10],bs_wgt[p11])
 				}
 
 				// call cic() with bootstrap sample
 				bs_cicresult=cic((*bs_Y)[p00],(*bs_Y)[p01],(*bs_Y)[p10],(*bs_Y)[p11],at,bs_wgt[p00],bs_wgt[p01],bs_wgt[p10],bs_wgt[p11])
 			}
 			else {
-
-if (b==1) "no weights"
 				// in the simple case of no regression adjustment and no weights, simply
 				// call cic() with a random draw of dependent variable
 				bs_cicresult=cic(bs_draw_nowgt((*bs_Y)[p00]),bs_draw_nowgt((*bs_Y)[p01]),bs_draw_nowgt((*bs_Y)[p10]),bs_draw_nowgt((*bs_Y)[p11]),at)
@@ -575,12 +568,12 @@ if (b==1) "no weights"
 
 			// save estimates into a matrix with one row per bootstrap sample
 			if (did) {
-				if (tot==1) bsdata[b,.]  =  (bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
-				else        bsdata[b,.]  = -(bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+				if (tot==1) bsdata[b,.]  =  (bs_didresult.coef',bs_didresult.did,bs_qdidresult,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+				else        bsdata[b,.]  = -(bs_didresult.coef',bs_didresult.did,bs_qdidresult,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dciuppbnd,bs_cicresult.dcilowbnd)
 			}
 			else {
 				if (tot==1) bsdata[b,.]  =  (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
-				else        bsdata[b,.]  = -(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)
+				else        bsdata[b,.]  = -(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dciuppbnd,bs_cicresult.dcilowbnd)
 			}
 
 			// show dots
@@ -616,16 +609,16 @@ if (b==1) "no weights"
 
 		  for(b=1; b<=cols(bsdata); ++b) {
 			if (did) {
-				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
-				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_didresult.coef',bs_didresult.did,bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
+				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (didresult.coef',didresult.did,qdid_result,result.con,result.dci,result.dcilowbnd,result.dciuppbnd)[1,b]))
+				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(didresult.coef',didresult.did,qdid_result,result.con,result.dci,result.dciuppbnd,result.dcilowbnd)[1,b]))
 			}
 			else {
-				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
-				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(bs_cicresult.con,bs_cicresult.dci,bs_cicresult.dcilowbnd,bs_cicresult.dciuppbnd)[1,b]))
+				if (tot==1) st_global( (bstempvars[1,b]+"[observed]")  , strofreal( (result.con,result.dci,result.dcilowbnd,result.dciuppbnd)[1,b]))
+				else        st_global( (bstempvars[1,b]+"[observed]")  , strofreal(-(result.con,result.dci,result.dciuppbnd,result.dcilowbnd)[1,b]))
 			}
-			 st_global( (bstempvars[1,b]+"[expression]"), ( "["+colfulllabels[b,1]+"]_b["+colfulllabels[b,2]+"]"))
-			 st_global( (bstempvars[1,b]+"[coleq]")     , colfulllabels[b,1])
-			 st_global( (bstempvars[1,b]+"[colname]")   , colfulllabels[b,2])
+			 st_global( (bstempvars[1,b]+"[expression]"), ( "["+ciclabels[b,1]+"]_b["+ciclabels[b,2]+"]"))
+			 st_global( (bstempvars[1,b]+"[coleq]")     , ciclabels[b,1])
+			 st_global( (bstempvars[1,b]+"[colname]")   , ciclabels[b,2])
 			 st_global( (bstempvars[1,b]+"[is_eexp]")   , "1" )
 		  }
 
@@ -641,7 +634,6 @@ _error( "Code for sedelta not written." )
 	else if (bsreps==0) "Specify vce() option to calculate standard errors."
 	else _error( "bsreps invalid.")
 "end of cic_caller"
-
 
 } // end of cic_caller; everthing is returned to Stata with st_*() commands.
 
@@ -779,7 +771,7 @@ struct cic_result scalar cic(real colvector Y00, real colvector Y01, real colvec
 
 
 // TRADITIONAL DIFFERENCES IN DIFFERENCES REGERSSION (OLS)
-struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real colvector wgt, real scalar round, |string rowvector varlist)
+struct did_result scalar did(real colvector y, real matrix rhs, real colvector wgt, real scalar round, |string rowvector varlist)
 {
 	// Inputs:
 	// (1) y, the dependent variable
@@ -791,7 +783,7 @@ struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real col
 	// (4) round, a scalar indicating the nearest unit for rounding Y (=0 for no rounding)
 	// (5) (optional) vector with variable list (columns corresponding to names of (y,rhs)
 	//
-	// Output: One structure (did_ols_result) with:
+	// Output: One structure (did_result) with:
 	// 1. *Y, pointer to adjusted variable (pointing to either a temporary variable or input y itself)
 	// 2. a vector with coefficients from the DID regression
 	// 3. (if varlist provided) labels for coefficients compatible for st_matrixcolstripe()
@@ -802,7 +794,7 @@ struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real col
 	D = ( ((-rhs[.,1]:+1):*(-rhs[.,2]:+1)), ((-rhs[.,1]:+1):*(rhs[.,2])), ((rhs[.,1]):*(-rhs[.,2]:+1)), ((rhs[.,1]):*(rhs[.,2])))
 
 	// OLS DID regression
-	struct did_ols_result scalar didresult
+	struct did_result scalar didresult
 	if (cols(rhs)==2) didresult.coef = invsym(quadcross(D,wgt,D))*quadcross(D,wgt,y)
 	else              didresult.coef = invsym(quadcross((D,rhs[.,3..cols(rhs)]),wgt,(D,rhs[.,3..cols(rhs)])))*quadcross((D,rhs[.,3..cols(rhs)]),wgt,y)
 
@@ -829,15 +821,6 @@ struct did_ols_result scalar did_ols(real colvector y, real matrix rhs, real col
 		// no covariaters or rounding, just point to input vector
 		didresult.Y = &y
 	}
-
-	// labels for didresult.coef
-	if (args()==5) {
-		if (cols(rhs)==2) didresult.labels = (J(rows(didresult.coef),1,"did_model"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3])))
-		else              didresult.labels = (J(rows(didresult.coef),1,"did_model"),( ( "0."+varlist[2]+"#0."+varlist[3]) \( "0."+varlist[2]+"#1."+varlist[3]) \( "1."+varlist[2]+"#0."+varlist[3]) \( "1."+varlist[2]+"#1."+varlist[3]) \ varlist[4..length(varlist)]'))
-	}
-	// labels for didresult.coef
-	didresult.didlabel = ( "did", "did" )
-
 	return(didresult)
 }
 
@@ -910,7 +893,7 @@ real scalar cdf(real scalar y, real vector P, real vector YS)
 // INVERSE OF CUMULATIVE DISTRIBUTION FUNCTION, EQUATION 8
 real scalar cdfinv(real scalar p, real vector P, real vector YS)
 {
-	// given a cumulative distrubtion functin (P) over the support points (YS),
+	// given a cumulative distrubtion function (P) over the support points (YS),
 	// returns the inverse of the empirical cumulative distribution function at probability p (0<p<1)
 	return(YS[min((length(YS)\select((1::length(YS)),(P:>=(p-epsilon(p))))))])
 }
@@ -1313,7 +1296,7 @@ set tracedepth 3
 if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-local Nreps = 15
+local Nreps = 200
 if 01     	local vce vce(bootstrap, reps(`Nreps'))
 else       	macro drop _vce
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -1365,6 +1348,7 @@ log using cid_test_aid_data.log, replace
 
 mac list _Nreps _vce
 
+/*
 * Temp stuff
 gen tempweight = 1
 replace tempweight = 2 in 1
@@ -1399,6 +1383,7 @@ timer off 24
 timer list
 
 exit
+*/
 
 // Table 1
 count
@@ -1408,23 +1393,19 @@ tabstat y ly , by(high_after) s(count mean sd min p25 p50 p75 p90 max) columns(s
 reg y high##after
 reg ly high##after
 
-cic  ly high after ,  at(5(10)95) `vce'
-ereturn list
-*set trace on
-
 // CIC estimates from A&I Appendix
 // Table 2
 timer on 2
-cic  y high after ,  at(25 50 75 90) `vce'
-cic ly high after ,  at(50)          `vce'
+cic  y high after ,  at(25 50 75 90) `vce' did
+cic ly high after ,  at(50)          `vce' did
 timer off 2
 timer list 2
 
 
 // Table 3
 timer on 3
-cic  y high after ,  at(25 50 75 90) `vce' untreated
-cic ly high after ,  at(50)          `vce' untreated
+cic  y high after ,  at(25 50 75 90) `vce' untreated did
+cic ly high after ,  at(50)          `vce' untreated did
 timer off 3
 timer list 3
 
@@ -1433,6 +1414,7 @@ log close
 
 // graphs
 cic  y high after ,  at(1 5(2.5)90) `vce'
+ereturn list
 cicgraph,  name(g) e(continuous discrete_ci dci_lower_bnd dci_upper_bnd)
 
 // compare vce() option above to the bootstrap prefix
