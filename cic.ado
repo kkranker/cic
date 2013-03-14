@@ -75,7 +75,8 @@ clear all
 * 1. SE option
 * 3. Add arguments so you can run only some of the
 *    options (e.g., continuous only or discrete or qreg)
-* 4. byable(recall) working right?
+*    1- return model name in e(model)
+*    2- In cic graph, make the default the model that was run (if only one was run)
 * 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
@@ -1180,102 +1181,6 @@ mata describe
 end
 /* * * * *  END OF MATA BLOCK * * * * */
 
-
-
-program define cicgraph, sortpreserve
-
-	// parse arguements
-	syntax [, ///
-		Ci(name) /// {normal|percentile|bc|bca|*} ///
-			/// ci() expecting normal, percentile, bc, or bca. However it will still
-			/// work if there is a conforming matrix named e(ci_`ci')
-			/// by default, -normal- is used if matrix e(ci_normal) exists
-		Equations(namelist) /// {continuous, discrete_ci, dci_lower_bnd, and/or dci_upper_bnd}
-		Name(name) /// graph names; if >1  name in equations(), names get .  graphs in memory will be replaced.
-		*]
-
-	if ("`e(cmd)'"!="cic") | (lower(e(vcetype))!="bootstrap") error 301
-
-	// pull coefficients
-	tempname b int
-	tempvar coef eqn p pctile mean meanll meanul meanaxis
-	matrix `b'  = e(b)
-	matrix `b'  = `b''
-	svmat `b' , names("`coef'")
-
-	// cic option
-	cap qui di colsof(e(ci_normal))
-	if !_rc & mi("`ci'")         local ci "normal"
-	if regexm("`ci'","^ci_(.*)") local ci = regexs(1) // if someone types ci_normal instead of normal, drop the "ci_"
-	if !mi("`ci'") {
-		if !inlist("`ci'","normal","percentile","bc","bca") di as txt "ci() expecting normal, percentile, bc, or bca. However it will work if there is a conforming matrix named e(ci_`ci')"
-		matrix `int' =  e(ci_`ci')
-		matrix `int' = `int''
-		local level =  e(level)
-		svmat `int',
-	}
-	else {
-		gen `int'1=.
-		gen `int'2=.
-	}
-
-	local rows = rowsof(`b')
-	if (c(N) < `rows') set obs `rows'
-
-	local names : rownames `b'
-	local eqns  : roweq `b'
-
-	local ylab : var lab `e(depvar)'
-	if mi(`"`ylab'"') local ylab = e(depvar)
-
-	qui {
-		gen `eqn' = ""
-		gen `p' = ""
-		gen `pctile' = .
-		forvalues i = 1/`rows' {
-			local thiseqn  : word `i' of `eqns'
-			local thisname : word `i' of `names'
-			replace `eqn' = "`thiseqn'"  in `i'
-			replace `p'   = "`thisname'" in `i'
-			if regexm("`thisname'","^q([0-9]*)_?([0-9]*)") replace `pctile' = real(regexs(1)+"."+regexs(2)) in `i'
-		}
-
-		bys `eqn' (`p'): gen `mean'     = `coef'[1] if inlist(_n,1,_N)
-		by  `eqn'      : gen `meanll'   = `int'1[1] if inlist(_n,1,_N)
-		by  `eqn'      : gen `meanul'   = `int'2[1] if inlist(_n,1,_N)
-		gen     `meanaxis' = 0
-		replace `meanaxis' = 100 if `p'!="mean"
-	}
-
-	// graph results
-	if mi("`equations'") local equations "continuous"
-	local c=1
-	foreach eqnname of local equations {
-		if      "`eqnname'"=="continuous"    local eqnlabel "CIC model with continuous outcomes"
-		else if "`eqnname'"=="discrete_ci"   local eqnlabel "CIC model with discrete outcomes"
-		else if "`eqnname'"=="dci_lower_bnd" local eqnlabel "Discrete CIC model lower bound"
-		else if "`eqnname'"=="dci_upper_bnd" local eqnlabel "Discrete CIC model upper bound"
-		else {
-			di as error "eqnname() should be continuous, discrete_ci, dci_lower_bnd, dci_upper_bnd"
-			error 198
-		}
-
-		if !mi("`ci'") local addlegendlabels label(4 "Quantiles `level'% CI") label(2 "Mean `level'% CI")
-		if !mi("`ci'") local addlegendorder  "4 2"
-
-		graph twoway ///
-			(scatter `mean'        `meanaxis', sort pstyle(p2) connect(L) msymbol(none) lwidth(*1.25)) ///
-			(scatter `meanll'      `meanaxis', sort pstyle(p2) connect(L) msymbol(none) lwidth(*.85)  lpattern(dash)) ///
-			(scatter `meanul'      `meanaxis', sort pstyle(p2) connect(L) msymbol(none) lwidth(*.85)  lpattern(dash)) ///
-			(rcap    `int'1 `int'2 `pctile',   sort pstyle(p1) lcolor(*.85) lwidth(*.85)) ///
-			(scatter `coef'        `pctile',   sort pstyle(p1) msize(*1.15) connect(L)) ///
-				if `eqn'=="`eqnname'", ///
-				legend(order(5 1 `addlegendorder') cols(2) label(5 "Quantiles") label(1 "Mean") `addlegendlabels' ) ///
-				xtitle( "Quantile" ) ytitle(`"`ylab'"') title( "`eqnlabel'") subtitle( "`=e(footnote)'" ) ///
-				name(`name'`=cond(`c'>1,"`c'","")',replace) `options'
-		local ++c
-	}
-end // end of cic program definition
 
 cd "C:\Users\keith\Desktop\CIC\"
 
