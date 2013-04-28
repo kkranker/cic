@@ -446,6 +446,9 @@ rows(uniqrows(*Y))
 		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dciuppbnd,result.dcilowbnd))
 	}
 
+"SE_CIC"
+se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)	
+	
 	// matrix labels for `mata_b'
 	string matrix ciclabels, didlabels, qdidlabels
 	ciclabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
@@ -1177,6 +1180,9 @@ end
 /* * * * *  END OF MATA BLOCK * * * * */
 
 
+include se_cic.ado
+include bottomsection.ado
+
 cd "C:\Users\keith\Desktop\CIC\"
 
 
@@ -1248,6 +1254,9 @@ log using cid_test_aid_data.log, replace
 
 mac list _Nreps _vce
 
+cic  y high after
+
+exit
 /*
 * Temp stuff
 gen tempweight = 1
