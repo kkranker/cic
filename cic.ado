@@ -1,5 +1,3 @@
-clear all
-
 *! $Id$
 *! Changes-in-changes
 *!
@@ -9,7 +7,7 @@ clear all
 *!
 *! Stata code by Keith Kranker
 *! Based on Matlab code by S. Athey & G. W. Imbens, published on S. Athey's website
-*! $Date$ 
+*! $Date$
 *
 *  Syntax:
 *
@@ -220,9 +218,9 @@ if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight
 	if "`untreated'"=="" ereturn local footnote "Effect of Treatment on the Treated Group"
 	else                 ereturn local footnote "Effect of Treatment on the Untreated Group"
 	di as txt "(" e(footnote) ")"
-
+/*
 mata: mata describe
-
+*/
 end // end of cic program definition
 
 
@@ -372,7 +370,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 		swap(Y,didresult.Y)
 	}
 	else if (round!=0) Y = &round(y,round)
-
+/*
 "sizeof(y)"
 sizeof(y)
 "sizeof(Y)"
@@ -391,7 +389,7 @@ rows((*Y))
 rows(uniqrows(y))
 "unique rows in *Y"
 rows(uniqrows(*Y))
-
+*/
 	// Permutation vectors identifying the four treat*post groups
 	real colvector p00, p01, p10, p11
 	st_select(p00=.,(1::N),(treat:==0 :& post:==0))
@@ -430,8 +428,9 @@ rows(uniqrows(*Y))
 //		st_select(W10=.,wgt,(treat:==1 :& post:==0))
 //		st_select(W11=.,wgt,(treat:==1 :& post:==1))
 //	}
+/*
 "Begin Main CIC call:"
-
+*/
 	// Call the main CIC routine
 	if (args()==8) result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
 	else           result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
@@ -446,9 +445,10 @@ rows(uniqrows(*Y))
 		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dciuppbnd,result.dcilowbnd))
 	}
 
+/*
 "SE_CIC"
-se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)	
-	
+se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)
+*/
 	// matrix labels for `mata_b'
 	string matrix ciclabels, didlabels, qdidlabels
 	ciclabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
@@ -482,7 +482,9 @@ se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)
 	}
 	st_numscalar( "e(N_support)",rows(uniqrows(*Y)))
 
+/*
 "start BS now:"
+*/
 	// Bootstrapping
 	if (bsreps>0) {
 		real scalar b
@@ -588,8 +590,9 @@ se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)
 				displayflush()
 			}
 		} // end loop through bs iterations
+/*
 "done with bootstrapping loosps"
-
+*/
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
 		  string rowvector bstempfile, bstempvars
@@ -636,8 +639,9 @@ _error( "Code for sedelta not written." )
 	}
 	else if (bsreps==0) "Specify vce() option to calculate standard errors."
 	else _error( "bsreps invalid.")
+/*
 "end of cic_caller"
-
+*/
 } // end of cic_caller; everthing is returned to Stata with st_*() commands.
 
 
@@ -1062,127 +1066,21 @@ void bs_se( string scalar in_ci, string scalar out_V )
 
 
 
-"check prob"
-prob((1\1\2\3),(1\2\3\4\5))
-prob((1\1\2\3),(1\2\3\4\5),(1\1\2\1))
-prob((1\  2\3),(1\2\3\4\5),(2  \2\1))
-prob((1\  2\3),(1\2\3\4\5),(1.5\1.5\.75))
-
-"check cdfinv & cdfinv_brckt"
-P  = (.1\.3\.6\.7\1.0)
-YS = (1\2\3\4\5)
-/* 1    = */ cdfinv(.05  , P, YS)
-/* 1    = */ cdfinv(.1   , P, YS)
-/* 2    = */ cdfinv(.2   , P, YS)
-/* 2    = */ cdfinv(.2999, P, YS)
-/* 2    = */ cdfinv(.3   , P, YS)
-/* 3    = */ cdfinv(.3001, P, YS)
-/* 5    = */ cdfinv(.9999, P, YS)
-/* 5    = */ cdfinv(1    , P, YS)
-
-/* -499 = */ cdfinv_brckt(.05  , P, YS)
-/* 1    = */ cdfinv_brckt(.1   , P, YS)
-/* 1    = */ cdfinv_brckt(.2   , P, YS)
-/* 1    = */ cdfinv_brckt(.2999, P, YS)
-/* 2    = */ cdfinv_brckt(.3   , P, YS)
-/* 2    = */ cdfinv_brckt(.3001, P, YS)
-/* 4    = */ cdfinv_brckt(.9999, P, YS)
-/* 5    = */ cdfinv_brckt(1    , P, YS)
-
-
-// YS
-// bs_draw_nowgt(YS)
-// bs_draw_nowgt(YS,(10\1\1\1\0))
-
-
-// check draw sample
-YS = (1\2\3\4\5\6\7\8)
-N00=N01=N10=N11=2
-for (i=1; i<=1000; i++) {
-	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11)
-	if (i==1) bs_draw
-	if (i==1) avg = bs_draw'
-	else      avg = (avg \ bs_draw')
-}
-meanvariance(avg)'
-colmin(avg)'
-colmax(avg)'
-
-popsize=rows(YS)
-tempwgt = (1\9\1\9\1\9\1\9)
-cumsum00 = quadrunningsum(tempwgt[1\2])
-cumsum01 = quadrunningsum(tempwgt[3\4])
-cumsum10 = quadrunningsum(tempwgt[5\6])
-cumsum11 = quadrunningsum(tempwgt[7\8])
-popsize00 = round(cumsum00[N00]) // the number of obs. in each group is rounded to the nearest integer
-popsize01 = round(cumsum01[N01])
-popsize10 = round(cumsum10[N10])
-popsize11 = round(cumsum11[N11])
-cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
-cumsum01 = cumsum01/cumsum01[N01]
-cumsum10 = cumsum10/cumsum10[N10]
-cumsum11 = cumsum11/cumsum11[N11]
-
-cumsum00
-popsize00
-
-for (i=1; i<=1000; i++) {
-	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
-	if (i==1) bs_draw
-	if (i==1) avg = bs_draw'
-	else      avg = (avg \ bs_draw')
-}
-meanvariance(avg)'
-colmin(avg)'
-colmax(avg)'
-
-popsize=1000
-cumsum00 = quadrunningsum(tempwgt[1\2])
-cumsum01 = quadrunningsum(tempwgt[3\4])
-cumsum10 = quadrunningsum(tempwgt[5\6])
-cumsum11 = quadrunningsum(tempwgt[7\8])
-popsize00 = round(cumsum00[N00]/colsum(tempwgt)*popsize) // the number of obs. in each group is rounded to the nearest integer
-popsize01 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
-popsize10 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
-popsize11 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
-cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
-cumsum01 = cumsum01/cumsum01[N01]
-cumsum10 = cumsum10/cumsum10[N10]
-cumsum11 = cumsum11/cumsum11[N11]
-
-
-cumsum00
-popsize00
-
-for (i=1; i<=100; i++) {
-	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
-	if (i==1) bs_draw
-	if (i==1) avg = bs_draw'
-	else      avg = (avg \ bs_draw')
-}
-meanvariance(avg)'
-colmin(avg)'
-colmax(avg)'
-
-cumdfinv((1::10), .94          )
-cumdfinv((1::10), .94,          J(10,1,1))
-cumdfinv((1::10), .9           )
-cumdfinv((1::10), .9 ,          J(10,1,1))
-
-cumdfinv((1::9) , .94          ,(2\J(8,1,1)))
-cumdfinv((1::9) , .84          ,(J(8,1,1)\2))
-cumdfinv((1::9) , .9           ,(2\J(8,1,1)))
-cumdfinv((1::9) , .8           ,(J(8,1,1)\2))
-
-mata describe
-
 end
 /* * * * *  END OF MATA BLOCK * * * * */
 
 
+exit
+/* * * * *  END OF PROGRAM * * * * */
+
+
+
+
+
+/*
 include se_cic.ado
 include bottomsection.ado
-
+*/
 cd "C:\Users\keith\Desktop\CIC\"
 
 
@@ -1254,10 +1152,11 @@ log using cid_test_aid_data.log, replace
 
 mac list _Nreps _vce
 
+/*
 cic  y high after
 
 exit
-/*
+
 * Temp stuff
 gen tempweight = 1
 replace tempweight = 2 in 1
