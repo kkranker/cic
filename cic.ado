@@ -1,6 +1,6 @@
 clear all
 
-*! *! version $Id$
+*! $Id$
 *! Changes-in-changes
 *!
 *! An implimentation of:
@@ -9,7 +9,7 @@ clear all
 *!
 *! Stata code by Keith Kranker
 *! Based on Matlab code by S. Athey & G. W. Imbens, published on S. Athey's website
-*! $Date$
+*! $Date$ 
 *
 *  Syntax:
 *
