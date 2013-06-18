@@ -109,7 +109,7 @@ program define cicgraph, sortpreserve rclass
 			(scatter `coef'        `pctile',   sort pstyle(p1) msize(*1.15) connect(L)) ///
 				if `eqn'=="`eqnname'", ///
 				legend(order(5 1 `addlegendorder') cols(2) label(5 "CIC at quantiles") label(1 "Mean CIC") `addlegendlabels' ) ///
-				xtitle( "Quantile" ) ytitle(`"`ylab'"') caption( "`eqnlabel'" "`=e(footnote)'" ) ///
+				xtitle( "Quantile" ) ytitle(`"`ylab'"') note( "`eqnlabel'" "`=e(footnote)'" ) ///
 				name(`graphname' `name_rhs') `options'
 		local ++c
 	}
