@@ -16,7 +16,7 @@ program define cicgraph, sortpreserve rclass
 			/// by default, -normal- is used if matrix e(ci_normal) exists
 			/// This will work whether or not you include "ci_"  (e.g., "ci_normal" and "normal" are both valid)
 		Equations(namelist) /// {continuous, discrete_ci, dci_lower_bnd, and/or dci_upper_bnd}
-		Name(name) /// graph names; default is name(cicgraph)
+		Name(string) /// graph names; default is name(cicgraph)
 			/// if >1  name in equations(), name is treated as a prefix.
 			/// graphs in memory will be replaced.
 		*]
@@ -82,19 +82,23 @@ program define cicgraph, sortpreserve rclass
 
 	// graph results
 	if mi("`equations'") local equations continuous discrete_ci dci_lower_bnd dci_upper_bnd
+	if !mi("`name'")     _parse comma name name_rhs:  name
 	if mi("`name'")      local name "cicgraph"
 	local c=1
 	foreach eqnname of local equations {
 		if      "`eqnname'"=="continuous"    local eqnlabel "CIC model with continuous outcomes"
-		else if "`eqnname'"=="discrete_ci"   local eqnlabel "CIC model with discrete outcomes"
-		else if "`eqnname'"=="dci_lower_bnd" local eqnlabel "Discrete CIC model lower bound"
-		else if "`eqnname'"=="dci_upper_bnd" local eqnlabel "Discrete CIC model upper bound"
+		else if "`eqnname'"=="discrete_ci"   local eqnlabel "CIC model with discrete outcomes (under the conditional independence assumption)"
+		else if "`eqnname'"=="dci_lower_bnd" local eqnlabel "Discrete CIC model lower bound (without conditional independence)"
+		else if "`eqnname'"=="dci_upper_bnd" local eqnlabel "Discrete CIC model upper bound (without conditional independence)"
 		else {
 			di as error "eqnname() should be continuous, discrete_ci, dci_lower_bnd, dci_upper_bnd"
 			error 198
 		}
+		if wordcount(`"`equations'"') == 1 local graphname `name'
+		else                               local graphname `name'`c'
+		local graphnamelist `graphnamelist' `graphname'
 
-		if !mi("`ci'") local addlegendlabels label(4 "Quantiles `level'% CI") label(2 "Mean `level'% CI")
+		if !mi("`ci'") local addlegendlabels label(4 "`level'% CI") label(2 "`level'% CI")
 		if !mi("`ci'") local addlegendorder  "4 2"
 
 		graph twoway ///
@@ -104,11 +108,10 @@ program define cicgraph, sortpreserve rclass
 			(rcap    `int'1 `int'2 `pctile',   sort pstyle(p1) lcolor(*.85) lwidth(*.85)) ///
 			(scatter `coef'        `pctile',   sort pstyle(p1) msize(*1.15) connect(L)) ///
 				if `eqn'=="`eqnname'", ///
-				legend(order(5 1 `addlegendorder') cols(2) label(5 "Quantiles") label(1 "Mean") `addlegendlabels' ) ///
-				xtitle( "Quantile" ) ytitle(`"`ylab'"') title( "`eqnlabel'") subtitle( "`=e(footnote)'" ) ///
-				name(`name'`=cond(`: word count `equations''>1,"`c'","")',replace) `options'
+				legend(order(5 1 `addlegendorder') cols(2) label(5 "CIC at quantiles") label(1 "Mean CIC") `addlegendlabels' ) ///
+				xtitle( "Quantile" ) ytitle(`"`ylab'"') caption( "`eqnlabel'" "`=e(footnote)'" ) ///
+				name(`graphname' `name_rhs') `options'
 		local ++c
-		local graphnamelist `graphnamelist' `name'`=cond(`: word count `equations''>1,"`=`c'","")'
 	}
 	return local cmd       cicgraph
 	return local name      `graphnamelist'
