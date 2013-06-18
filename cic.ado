@@ -76,6 +76,8 @@
 *    1- return model name in e(model)
 *    2- In cic graph, make the default the model that was run (if only one was run)
 * 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
+* 6. only run some models
+* 7. for labels and documentation and cic graph, figure out what to call the 4 models.
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 
@@ -159,9 +161,9 @@ program define Estimate, eclass byable(recall)
 
 	// adjust y for covariates (OLS regression)
 	local runDID  = (("`did'"=="did") | (`: list sizeof varlist'!=0))
-
+/*
 if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight'`exp'], `diopts' `level' nocons
-
+*/
 	// implement mata CIC routine
 	ereturn clear
 	tempname mata_b
