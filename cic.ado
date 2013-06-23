@@ -9,7 +9,7 @@ clear all
 *!
 *! Stata code by Keith Kranker
 *! Based on Matlab code by S. Athey & G. W. Imbens, published on S. Athey's website
-*! $Date$ 
+*! $Date$
 *
 *  Syntax:
 *
@@ -78,6 +78,8 @@ clear all
 *    1- return model name in e(model)
 *    2- In cic graph, make the default the model that was run (if only one was run)
 * 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
+* 6. only run some models
+* 7. for labels and documentation and cic graph, figure out what to call the 4 models.
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 
