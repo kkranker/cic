@@ -80,6 +80,8 @@ clear all
 * 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
 * 6. only run some models
 * 7. for labels and documentation and cic graph, figure out what to call the 4 models.
+* 8. cic_caller - does it really need arguements?
+* 9. did + untreated: are the signs right?
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 
