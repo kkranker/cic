@@ -174,7 +174,6 @@ program define Estimate, eclass byable(recall)
 
 	// adjust y for covariates (OLS regression)
 	local runDID  = (("`did'"=="did") | (`: list sizeof varlist'!=0))
-if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight'`exp'], `diopts' `level' nocons
 
 	// implement mata CIC routine
 	ereturn clear
@@ -407,23 +406,6 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 		else           qdid_result=qdid((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
 	}
 
-//	// Select the rows belonging to the treat*post groups
-//	real colvector Y00, Y01, Y10, Y11
-//	st_select(Y00=.,*Y,(treat:==0 :& post:==0))
-//	st_select(Y01=.,*Y,(treat:==0 :& post:==1))
-//	st_select(Y10=.,*Y,(treat:==1 :& post:==0))
-//	st_select(Y11=.,*Y,(treat:==1 :& post:==1))
-//
-//	// Select the rows of wgt belonging to the treat*post groups
-//	if (args()!=8) {
-//		real colvector W00, W01, W10, W11
-//		st_select(W00=.,wgt,(treat:==0 :& post:==0))
-//		st_select(W01=.,wgt,(treat:==0 :& post:==1))
-//		st_select(W10=.,wgt,(treat:==1 :& post:==0))
-//		st_select(W11=.,wgt,(treat:==1 :& post:==1))
-//	}
-"Begin Main CIC call:"
-
 	// Call the main CIC routine
 	if (args()==8) result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
 	else           result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
@@ -471,7 +453,6 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	}
 	st_numscalar( "e(N_support)",rows(uniqrows(*Y)))
 
-"start BS now:"
 	// Bootstrapping
 	if (bsreps>0) {
 		real scalar b
@@ -577,7 +558,6 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 				displayflush()
 			}
 		} // end loop through bs iterations
-"done with bootstrapping loops"
 
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
@@ -631,7 +611,6 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	}
 	else if (bsreps==0) "Specify vce() option to calculate standard errors."
 	else _error( "bsreps invalid.")
-"end of cic_caller"
 
 } // end of cic_caller; everthing is returned to Stata with st_*() commands.
 
@@ -1193,7 +1172,7 @@ real rowvector se_cic(real colvector Y00, real colvector Y01, real colvector Y10
 	V11=sum((P:^2):*select(f11,f11:>epsilon(1))):/length(Y11)
 	// A.5 final result
 	V[1]=V00+V01+V10+V11
-"sqrt(V[1]) = "; sqrt(V[1])
+	// "sqrt(V[1]) = "; sqrt(V[1])
 
 	// B. dci standard error
 	// numerical approximation to delta method
@@ -1267,7 +1246,7 @@ real rowvector se_cic(real colvector Y00, real colvector Y01, real colvector Y10
 	V11=quadcross(der11,V11)*der11
 	// B.5 components dci variance
 	V[2]=V00+V01+V10+V11
-"sqrt(V[2]) = "; sqrt(V[2])
+	// "sqrt(V[2]) = "; sqrt(V[2])
 
 	// C. lower bound standard error
 	k_bar=J(length(YS10),1,0)
@@ -1279,7 +1258,7 @@ real rowvector se_cic(real colvector Y00, real colvector Y01, real colvector Y10
 	V10=sum((k_bar:^2):*select(f10,f10:>epsilon(1)))/length(Y10)
 	V11=sum((dy11 :*dy11) :*select(f11,f11:>epsilon(1)))/length(Y11)
 	V[3] = V10+V11
-"sqrt(V[3]) = "; sqrt(V[3])
+	// "sqrt(V[3]) = "; sqrt(V[3])
 
 	// D. upper bound standard error
 	k_bar=J(length(YS10),1,0)
@@ -1291,7 +1270,7 @@ real rowvector se_cic(real colvector Y00, real colvector Y01, real colvector Y10
 	V10=sum((k_bar:^2):*select(f10,f10:>epsilon(1)))/length(Y10)
 	V11=sum((dy11:^2) :*select(f11,f11:>epsilon(1)))/length(Y11)
 	V[4] = V10+V11
-"sqrt(V[4]) = "; sqrt(V[4])
+	// "sqrt(V[4]) = "; sqrt(V[4])
 
 	// DONE.  RETURN STRUCTURE W/ ROW VECTORS CONTAINING POINT ESTIMATES.
 	return(V)
