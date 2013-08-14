@@ -9,11 +9,11 @@ clear all
 *!
 *! Stata code by Keith Kranker
 *! Based on Matlab code by S. Athey & G. W. Imbens, published on S. Athey's website
-*! $Date$
+*! Last updated $Date$
 *
 *  Syntax:
 *
-*  cic y_var treat_var post_var [control_varlist] [if] [in] [using] [weight] [, options]
+*  cic y_var treat_var post_var [control_varlist] [if] [in] [using] [fweight iweight aweight] [, options]
 *
 *  where
 *    y_var                    is the dependent variable
@@ -101,13 +101,12 @@ program cic, properties(mi) eclass byable(onecall)
 	ereturn local title   "Changes in Changes (CIC) Model"
 end
 
-//"
 
 program define Estimate, eclass byable(recall)
 	version 11.2
 
 	// parse arguments
-	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fweight iweight]  ///
+	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fweight iweight aweight]  ///
 		[, at(numlist min=1 >=0 <=100 sort) ///
 		Vce(passthru) ///
 		did ///
@@ -138,8 +137,8 @@ program define Estimate, eclass byable(recall)
 	local bsreps  = r(bsreps)
 	local bsiwpop = r(bsiwpop)
 	local dots    = r(dots)
-	if !missing(r(bsopts))       local bsopts       = r(bsopts)
-	if !missing(r(saving))       local saving       = r(saving)
+	if !missing(r(bsopts)) local bsopts = r(bsopts)
+	if !missing(r(saving)) local saving = r(saving)
 	local sepercentile = (r(sepercentile)==1)
 
 	// prep to handle weights
@@ -147,15 +146,28 @@ program define Estimate, eclass byable(recall)
 		tempvar wgtvar
 		gen `wgtvar'`exp' if `touse'
 		summ `wgtvar' if `touse' , meanonly
-		local n=round(r(sum))
 		if "`wgtvar'"=="iweight" {
 			if ("`vce'"=="bootstrap" & `bsiwpop'==0) {
 				di as error "If bootstrapping standard errors with iweights, you must use the vce(bootstrap, pop(N)) suboption to declare the population size."
 				error 198
 			}
 			local wtexp_caller = `", "`wgtvar'", `bsiwpop' "'
+			local n=round(r(sum))
 		}
-		else local wtexp_caller = `", "`wgtvar'", `bsiwpop' "'
+		else if "`wgtvar'"=="aweight" {
+			summ `wgtvar' if `touse', meanonly
+			qui replace `wgtvar' = `wgtvar' / r(mean)
+			local wtexp_caller = `", "`wgtvar'", `=r(N)' "'
+			local n=round(r(sum))
+		}
+		else {
+			local wtexp_caller = `", "`wgtvar'", `bsiwpop' "' // fweight
+			local n=round(r(sum))
+		}
+		if "`vce'"=="delta" {
+			di as err "vce(delta) is not allowed with weights."
+			error 198
+		}
 	}
 	else {
 		qui count if `touse'
@@ -165,12 +177,11 @@ program define Estimate, eclass byable(recall)
 
 	// adjust y for covariates (OLS regression)
 	local runDID  = (("`did'"=="did") | (`: list sizeof varlist'!=0))
-
 if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight'`exp'], `diopts' `level' nocons
 
 	// implement mata CIC routine
 	ereturn clear
-	tempname mata_b
+	tempname mata_b mata_V
 	if "`untreated'"=="" {
 		// default - effect of treatment on the treated
 		mata: cic_caller( "`y' `treat'   `post' `varlist'", "`touse'", "at", `runDID', 1, `bsreps', `dots', `round' `wtexp_caller')
@@ -205,6 +216,12 @@ if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight
 			ereturn display
 		}
 	}
+	else if ("`vce'"=="delta") {
+		// otherwise just use ereturn to get pretty estimates table
+		di as txt _col(49) "Number of obs      =" as res %8.0fc = e(N)
+		ereturn post `mata_b' `mata_V' [`weight'`exp'], depname(`y') obs(`n') esample(`touse') dof(`=`n'-colsof(`mata_b')') `level'
+		ereturn display
+	}
 	else {
 		// otherwise just use ereturn to get pretty estimates table
 		di as txt _col(49) "Number of obs      =" as res %8.0fc = e(N)
@@ -225,8 +242,6 @@ if ( `runDID' ) regress `y' ibn.`treat'#ibn.`post' `varlist' if `touse' [`weight
 	else                 ereturn local footnote "Effect of Treatment on the Untreated Group"
 	di as txt "(" e(footnote) ")"
 
-mata: mata describe
-
 end // end of cic program definition
 
 
@@ -246,8 +261,8 @@ program define cic_vce_parse, rclass
 	syntax , vce(string asis)
 	_parse comma vce 0 : vce
 	if  inlist( "`vce'","bootstra","bootstr","bootst","boots","boot","boo","bo","b") local vce "bootstrap"
-	if  inlist( "`vce'","delt","del","de","d")                                       local vce "delta"
-	if  inlist( "`vce'","non","no","n")                                              local vce "none"
+	if  inlist( "`vce'","delt","del","de","d") local vce "delta"
+	if  inlist( "`vce'","non","no","n") local vce "none"
 
 	if ("`vce'"!="bootstrap") & !mi("`0'") {
 		di as error "suboptions are not allowed with vce(`vce')"
@@ -292,8 +307,7 @@ mata set matalnum on /* drop this later */
 
 // STRUCTURES FOR RETURNING RESULTS
 struct cic_result {
-	real rowvector con, dci, dcilowbnd, dciuppbnd
-	real rowvector se_con, se_dci, se_dcilowbnd, se_dciuppbnd
+	real rowvector con, dci, dcilowbnd, dciuppbnd, se
 }
 struct did_result {
 	pointer(real colvector) Y
@@ -450,9 +464,6 @@ rows(uniqrows(*Y))
 		else     st_matrix(st_local("mata_b"), -(result.con,result.dci,result.dciuppbnd,result.dcilowbnd))
 	}
 
-"SE_CIC"
-se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)	
-	
 	// matrix labels for `mata_b'
 	string matrix ciclabels, didlabels, qdidlabels
 	ciclabels=((J(1+length(at),1,"continuous") \ J(1+length(at),1,"discrete_ci") \ J(1+length(at),1,"dci_lower_bnd") \ J(1+length(at),1,"dci_upper_bnd")),J(4,1,strtoname(("mean" , ("q":+strofreal(at*100))))'))
@@ -592,7 +603,7 @@ se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)
 				displayflush()
 			}
 		} // end loop through bs iterations
-"done with bootstrapping loosps"
+"done with bootstrapping loops"
 
 		// save bootstrap iterations in a temporary .dta file (named `bstempfile')
 		stata( "preserve" )
@@ -636,7 +647,13 @@ se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at)
 		stata( "restore" )
 	} // done bootstrapping
 	else if (bsreps==-1) {
-_error( "Code for sedelta not written." )
+		real matrix V_delta
+		V_delta = se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],result)
+		V_delta  = (( V_delta[1], J(1,length(at),0), V_delta[2], J(1,length(at),0), V_delta[3], J(1,length(at),0), V_delta[4], J(1,length(at),0)))
+		if (did) V_delta = (J(1,rows(didlabels)+1+rows(qdidlabels),0),V_delta)
+		st_matrix(st_local("mata_V"),diag(V_delta))
+		st_matrixcolstripe(st_local("mata_V"), ciclabels)
+		st_matrixrowstripe(st_local("mata_V"), ciclabels)
 	}
 	else if (bsreps==0) "Specify vce() option to calculate standard errors."
 	else _error( "bsreps invalid.")
@@ -863,6 +880,8 @@ real rowvector qdid(real colvector Y00, real colvector Y01, real colvector Y10, 
 }
 
 
+
+
 // SAMPLE PROPORTIONS
 real vector prob(real vector Y, real vector YS, |real vector wgt)
 {
@@ -1051,7 +1070,7 @@ real colvector bs_draw_wgt(real colvector      p00, real colvector      p01, rea
 }
 
 
-// AFTER BSTAT STATA PROGRAM, USE 95 PERCENTILES OF BOOTSTRAP ITERATIONS TO BACK-OUT STANDARD ERRORS
+// AFTER BSTAT STATA COMMAND, USE 95 PERCENTILES OF BOOTSTRAP ITERATIONS TO BACK-OUT STANDARD ERRORS
 void bs_se( string scalar in_ci, string scalar out_V )
 {
 	// Inputs: 1. Vector with
@@ -1178,6 +1197,9 @@ cumdfinv((1::9) , .84          ,(J(8,1,1)\2))
 cumdfinv((1::9) , .9           ,(2\J(8,1,1)))
 cumdfinv((1::9) , .8           ,(J(8,1,1)\2))
 
+
+
+
 mata describe
 
 end
@@ -1258,7 +1280,8 @@ log using cid_test_aid_data.log, replace
 
 mac list _Nreps _vce
 
-cic  y high after
+cic  y high after, vce(d)
+cic  y high after, vce(d) did
 
 exit
 /*

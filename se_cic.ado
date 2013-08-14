@@ -1,4 +1,4 @@
-mata:
+
 // Univariate density function
 real scalar fden(real scalar y, real colvector Y, | real colvector wgt) {
 	// 	this function estimates a univariate density function using kernel methods
@@ -31,22 +31,18 @@ real scalar fden(real scalar y, real colvector Y, | real colvector wgt) {
 	else           return(mean(kd/h,wgt)) // weighted
 }
 
-
 // test fden w/ this vector
 Y= ( 1.11 \ 1.1 \ 1.2 \ 1.3 \ 5 \ 5.1 \ 5.2 \ 10 \ 10 \ 10 )
 
-// the following three should all equal
-// 0.072278
-
+// the following three should all equal 0.072278
 fden(1.1,Y)                           // no weights
 fden(1.1,Y, J(10,1,1) )               // weight = 1
 fden(1.1,Y[1..8], (J(7,1,1) \ 3) )    // weight = 1, except handle three "10" at bottom
 
-// the following two should equal
-// 0.076557
-
+// the following two should equal  0.076557
 fden(1.1,(Y\Y))                       // stack Y on top of itself
 fden(1.1,Y, J(10,1,2))                // weight = 2
+
 
 // CUMULATIVE DISTRIBUTION FUNCTION
 real scalar cdf_bar(real scalar y, real vector P, real vector YS)
@@ -59,8 +55,9 @@ real scalar cdf_bar(real scalar y, real vector P, real vector YS)
 	else                                  return(P[colsum((YS:<(y-epsilon(y))))])
 }
 
+
 // Standard Error for CIC ROUTINE
-struct cic_result scalar se_cic(real colvector Y00, real colvector Y01, real colvector Y10, real colvector Y11, real rowvector at, | real colvector W00, real colvector W01, real colvector W10, real colvector W11 )
+real rowvector se_cic(real colvector Y00, real colvector Y01, real colvector Y10, real colvector Y11, struct cic_result scalar result , | real colvector W00, real colvector W01, real colvector W10, real colvector W11 )
 {
 	// Inputs:
 	//   (1)-(4) Four column vectors with dependent variable
@@ -71,21 +68,11 @@ struct cic_result scalar se_cic(real colvector Y00, real colvector Y01, real col
 	//   (5)     Vector with k>=1 quantiles of interest, ranging from 0 to 1
 	//   (6)-(9) (Optional) Column with fweights or iweights for Y00, Y01, Y10, and Y11 (respectively)
 	//
-	// Output: One structure (cic_result) with four row vectors.
-	//   Each vector has (1+k) elements. The first element is the mean, followed by k results (one for each quantile in -at-).
-	//   (1) result.se_con       = CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
-	//   (2) result.se_dci       = CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
-	//   (3) result.se_dcilowbnd = LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
-	//   (4) result.se_dciuppbnd = UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
-
-	// The code in cic() is somewhat convoluted because I am
-	// calculating all four vectors simultaneously.
-	// See the NOTE (below, at the bottom of the file)
-	// for alternative routines that are more readily
-	// accessible. The calculations here lead to
-	// slower run-times.
-
-/* input variable 'At' is unused */
+	// Output: One 1x4 vector
+	//   (1) V[1,1] = StdError^2 FOR CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
+	//   (2) V[1,2] = StdError^2 FOR CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
+	//   (3) V[1,3] = StdError^2 FOR LOWER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
+	//   (4) V[1,4] = StdError^2 FOR UPPER BOUND ESTIMATE OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
 
 	// Need all or none of args (6)-(9)
 	if (args()>5 & args()!=9) _error(( "Expected 5 or 9 arguements, but received " + strofreal(args())))
@@ -110,6 +97,8 @@ struct cic_result scalar se_cic(real colvector Y00, real colvector Y01, real col
 		f11=prob(Y11,YS)
 	}
 	else {
+		// Confirm weights are integers
+		if (trunc(W00\W01\W10\W11)!=(W00\W01\W10\W11)) _error( "Only freqency weights are allowed with se_cic()." )
 		// CDFs with weights
 		f00=prob(Y00,YS,W00)
 		f01=prob(Y01,YS,W01)
@@ -126,10 +115,9 @@ struct cic_result scalar se_cic(real colvector Y00, real colvector Y01, real col
 	F10[length(F10)]=1
 	F11[length(F11)]=1
 
-	// Results will be returned into a structure w/ 4 vectors for con, dci, lower, upper
-	struct cic_result scalar result
-result=cic(Y00,Y01,Y10,Y11,at)
-result.se_con=result.se_dci=result.se_dcilowbnd=result.se_dciuppbnd=J(1,1+length(at),.)
+	// Results will be returned into a 4x1 row vector (con, dci, lower, upper)
+	real rowvector V
+	V=J(1,4,.)
 
 	// A. continuous estimator
 	// A.0. preliminaries
@@ -162,8 +150,8 @@ result.se_con=result.se_dci=result.se_dcilowbnd=result.se_dciuppbnd=J(1,1+length
 	P=YS11:-quadcross(YS,f11)
 	V11=sum((P:^2):*select(f11,f11:>epsilon(1))):/length(Y11)
 	// A.5 final result
-	result.se_con[1]=sqrt(V00+V01+V10+V11)
-"result.se_con = "; result.se_con
+	V[1]=V00+V01+V10+V11
+"sqrt(V[1]) = "; sqrt(V[1])
 
 	// B. dci standard error
 	// numerical approximation to delta method
@@ -236,8 +224,8 @@ result.se_con=result.se_dci=result.se_dcilowbnd=result.se_dciuppbnd=J(1,1+length
 	}
 	V11=quadcross(der11,V11)*der11
 	// B.5 components dci variance
-	result.se_dci[1]=sqrt(V00+V01+V10+V11)
-"result.se_dci = "; result.se_dci
+	V[2]=V00+V01+V10+V11
+"sqrt(V[2]) = "; sqrt(V[2])
 
 	// C. lower bound standard error
 	k_bar=J(length(YS10),1,0)
@@ -248,8 +236,8 @@ result.se_con=result.se_dci=result.se_dcilowbnd=result.se_dciuppbnd=J(1,1+length
 	dy11 =YS11 :-quadcross(YS11, select(f11,f11:>epsilon(1)))
 	V10=sum((k_bar:^2):*select(f10,f10:>epsilon(1)))/length(Y10)
 	V11=sum((dy11 :*dy11) :*select(f11,f11:>epsilon(1)))/length(Y11)
-	result.se_dcilowbnd[1] = sqrt(V10+V11)
-"result.se_dcilowbnd  = "; result.se_dcilowbnd
+	V[3] = V10+V11
+"sqrt(V[3]) = "; sqrt(V[3])
 
 	// D. upper bound standard error
 	k_bar=J(length(YS10),1,0)
@@ -260,11 +248,9 @@ result.se_con=result.se_dci=result.se_dcilowbnd=result.se_dciuppbnd=J(1,1+length
 	dy11 =YS11 :-quadcross(YS11, select(f11,f11:>epsilon(1)))
 	V10=sum((k_bar:^2):*select(f10,f10:>epsilon(1)))/length(Y10)
 	V11=sum((dy11:^2) :*select(f11,f11:>epsilon(1)))/length(Y11)
-	result.se_dciuppbnd[1] = sqrt(V10+V11)
-"result.se_dciuppbnd  = "; result.se_dciuppbnd
+	V[4] = V10+V11
+"sqrt(V[4]) = "; sqrt(V[4])
 
 	// DONE.  RETURN STRUCTURE W/ ROW VECTORS CONTAINING POINT ESTIMATES.
-	return(result)
+	return(V)
 } // end of cic
-
-end // exit Mata
