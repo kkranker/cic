@@ -149,9 +149,7 @@ end
 
 
 
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 * test cic_vce_parse
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 cic_vce_parse, vce(boot, reps(1000) saving(myfile.dta, replace) sepercent)
 return list
 cap nois cic_vce_parse, vce(none, reps(25))
@@ -172,9 +170,9 @@ else       	macro drop _vce
 
 
 
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-* with athey and imbens data  suppliment
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+* Benchmark againt results in Athey and Imbens supplimental appendix
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 // load data
 
@@ -213,50 +211,11 @@ qui {
 set seed 1
 
 cap log close
-log using cid_test_aid_data.log, replace
+log using cic_benchmark_testing.log, replace
 
 mac list _Nreps _vce
 
-cic  y high after, vce(d)
-cic  y high after, vce(d) did
 
-exit
-/*
-* Temp stuff
-gen tempweight = 1
-replace tempweight = 2 in 1
-// bys high after: replace tempweight = 50 if _n<=20
-
-egen agegroup = cut(age), group(7)
-
-
-* Basic
-timer on 21
-cic  y high after, at(5(10)95) `vce' did
-timer off 21
-
-* With control variables
-timer on 22
-cap nois cic  y high after i.agegroup, did `vce' round(.25)
-timer off 22
-
-* Test recall
-cic
-cicgraph , name(r0)
-
-* With weights
-timer on 23
-cap nois cic ly high after [fw=tempweight], did  `vce'
-timer off 23
-
-* With control variables and weights
-timer on 24
-cap nois cic ly high after i.agegroup [fw=tempweight], did `vce' round(.25)
-timer off 24
-timer list
-
-exit
-*/
 
 // Table 1
 count
@@ -282,17 +241,46 @@ cic ly high after ,  at(50)          `vce' untreated did
 timer off 3
 timer list 3
 
-log close
-
-exit
-
 // graphs
 cic  y high after ,  at(1 5(2.5)90) `vce'
 ereturn list
 cicgraph,  name(g) e(continuous discrete_ci dci_lower_bnd dci_upper_bnd)
 
-// compare vce() option above to the bootstrap prefix
 
+// VCE via delta metho
+cic  y high after, vce(delta)     at(25 50 75 90)
+cic  y high after, vce(delta) did at(25 50 75 90)
+
+
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+* Test misc features with this dataset
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+* Basic
+cic  y high after, at(5(10)95) `vce' did
+
+* With control variables
+egen agegroup = cut(age), group(7)
+cap nois cic  y high after i.agegroup, did `vce' round(.25)
+
+* Test recall
+cic
+cicgraph , name(r0)
+
+* With weights
+gen tempweight = 1
+replace tempweight = 2 in 1
+cap nois cic ly high after [fw=tempweight], did  `vce'
+
+* With control variables and weights
+timer on 24
+cap nois cic ly high after i.agegroup [fw=tempweight], did `vce' round(.25)
+timer off 24
+timer list
+
+
+
+// compare vce() option above to the bootstrap prefix
 set seed 1
 timer on 10
 cic y high after, vce(bootstrap, reps(`Nreps'))
@@ -339,11 +327,14 @@ cap nois {
 }
 
 // we should get an error with vce(delta) since I haven't coded it up yet
-cap nois cic  y high after ,  at(25 50 75 90) vce(delta)
+cap nois cic  y high after ,   vce(delta)
 
 
 ereturn list
 
+
+log close
+exit 
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
