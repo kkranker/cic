@@ -72,15 +72,12 @@ clear all
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 * TO DO
-* 1. SE option
 * 3. Add arguments so you can run only some of the
-*    options (e.g., continuous only or discrete or qreg)
+*    models (e.g., continuous only or discrete or qreg)
 *    1- return model name in e(model)
-*    2- In cic graph, make the default the model that was run (if only one was run)
-* 5. add error/documentation that *  fweights, but not iweights, work with vce( ??????????????? )
-* 6. only run some models
+*    2- In cicgraph, make the default the model that was run (if only one was run)
 * 7. for labels and documentation and cic graph, figure out what to call the 4 models.
-* 8. cic_caller - does it really need arguements?
+* 8. cic_caller - does it really need arguements at all?
 * 9. did + untreated: are the signs right?
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
@@ -164,8 +161,8 @@ program define Estimate, eclass byable(recall)
 			local wtexp_caller = `", "`wgtvar'", `bsiwpop' "' // fweight
 			local n=round(r(sum))
 		}
-		if "`vce'"=="delta" {
-			di as err "vce(delta) is not allowed with weights."
+		if ("`vce'"=="delta" & "`weight'"!="fweight") {
+			di as err "vce(delta) is not allowed with `weight's."
 			error 198
 		}
 	}
@@ -1462,7 +1459,6 @@ end
 /* * * * *  END OF MATA BLOCK * * * * */
 
 
-include se_cic.ado
 include bottomsection.ado
 
 cd "C:\Users\keith\Desktop\CIC\"
