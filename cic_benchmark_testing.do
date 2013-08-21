@@ -4,158 +4,9 @@
 *! Last updated $Date$
 
 clear all
-cd "C:\Users\keith\Desktop\CIC\"
+cd "C:\Users\kkranker\Documents\Dissertation\Stata-Changes-in-Changes"
 include cic.ado
 
-/* * * * *  BEGIN MATA BLOCK * * * * */
-version 11.2
-mata:
-mata set matastrict on
-mata set matafavor speed
-mata set matalnum on /* drop this later */
-
-"check prob"
-prob((1\1\2\3),(1\2\3\4\5))
-prob((1\1\2\3),(1\2\3\4\5),(1\1\2\1))
-prob((1\  2\3),(1\2\3\4\5),(2  \2\1))
-prob((1\  2\3),(1\2\3\4\5),(1.5\1.5\.75))
-
-"check cdfinv & cdfinv_brckt"
-P  = (.1\.3\.6\.7\1.0)
-YS = (1\2\3\4\5)
-/* 1    = */ cdfinv(.05  , P, YS)
-/* 1    = */ cdfinv(.1   , P, YS)
-/* 2    = */ cdfinv(.2   , P, YS)
-/* 2    = */ cdfinv(.2999, P, YS)
-/* 2    = */ cdfinv(.3   , P, YS)
-/* 3    = */ cdfinv(.3001, P, YS)
-/* 5    = */ cdfinv(.9999, P, YS)
-/* 5    = */ cdfinv(1    , P, YS)
-
-/* -499 = */ cdfinv_brckt(.05  , P, YS)
-/* 1    = */ cdfinv_brckt(.1   , P, YS)
-/* 1    = */ cdfinv_brckt(.2   , P, YS)
-/* 1    = */ cdfinv_brckt(.2999, P, YS)
-/* 2    = */ cdfinv_brckt(.3   , P, YS)
-/* 2    = */ cdfinv_brckt(.3001, P, YS)
-/* 4    = */ cdfinv_brckt(.9999, P, YS)
-/* 5    = */ cdfinv_brckt(1    , P, YS)
-
-
-// YS
-// bs_draw_nowgt(YS)
-// bs_draw_nowgt(YS,(10\1\1\1\0))
-
-
-// check draw sample
-YS = (1\2\3\4\5\6\7\8)
-N00=N01=N10=N11=2
-for (i=1; i<=1000; i++) {
-	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11)
-	if (i==1) bs_draw
-	if (i==1) avg = bs_draw'
-	else      avg = (avg \ bs_draw')
-}
-meanvariance(avg)'
-colmin(avg)'
-colmax(avg)'
-
-popsize=rows(YS)
-tempwgt = (1\9\1\9\1\9\1\9)
-cumsum00 = quadrunningsum(tempwgt[1\2])
-cumsum01 = quadrunningsum(tempwgt[3\4])
-cumsum10 = quadrunningsum(tempwgt[5\6])
-cumsum11 = quadrunningsum(tempwgt[7\8])
-popsize00 = round(cumsum00[N00]) // the number of obs. in each group is rounded to the nearest integer
-popsize01 = round(cumsum01[N01])
-popsize10 = round(cumsum10[N10])
-popsize11 = round(cumsum11[N11])
-cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
-cumsum01 = cumsum01/cumsum01[N01]
-cumsum10 = cumsum10/cumsum10[N10]
-cumsum11 = cumsum11/cumsum11[N11]
-
-cumsum00
-popsize00
-
-for (i=1; i<=1000; i++) {
-	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
-	if (i==1) bs_draw
-	if (i==1) avg = bs_draw'
-	else      avg = (avg \ bs_draw')
-}
-meanvariance(avg)'
-colmin(avg)'
-colmax(avg)'
-
-popsize=1000
-cumsum00 = quadrunningsum(tempwgt[1\2])
-cumsum01 = quadrunningsum(tempwgt[3\4])
-cumsum10 = quadrunningsum(tempwgt[5\6])
-cumsum11 = quadrunningsum(tempwgt[7\8])
-popsize00 = round(cumsum00[N00]/colsum(tempwgt)*popsize) // the number of obs. in each group is rounded to the nearest integer
-popsize01 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
-popsize10 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
-popsize11 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
-cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
-cumsum01 = cumsum01/cumsum01[N01]
-cumsum10 = cumsum10/cumsum10[N10]
-cumsum11 = cumsum11/cumsum11[N11]
-
-
-cumsum00
-popsize00
-
-for (i=1; i<=100; i++) {
-	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
-	if (i==1) bs_draw
-	if (i==1) avg = bs_draw'
-	else      avg = (avg \ bs_draw')
-}
-meanvariance(avg)'
-colmin(avg)'
-colmax(avg)'
-
-cumdfinv((1::10), .94          )
-cumdfinv((1::10), .94,          J(10,1,1))
-cumdfinv((1::10), .9           )
-cumdfinv((1::10), .9 ,          J(10,1,1))
-
-cumdfinv((1::9) , .94          ,(2\J(8,1,1)))
-cumdfinv((1::9) , .84          ,(J(8,1,1)\2))
-cumdfinv((1::9) , .9           ,(2\J(8,1,1)))
-cumdfinv((1::9) , .8           ,(J(8,1,1)\2))
-
-// test fden w/ this vector
-Y= ( 1.11 \ 1.1 \ 1.2 \ 1.3 \ 5 \ 5.1 \ 5.2 \ 10 \ 10 \ 10 )
-
-// the following three should all equal 0.072278
-fden(1.1,Y)                           // no weights
-fden(1.1,Y, J(10,1,1) )               // weight = 1
-fden(1.1,Y[1..8], (J(7,1,1) \ 3) )    // weight = 1, except handle three "10" at bottom
-
-// the following two should equal  0.076557
-fden(1.1,(Y\Y))                       // stack Y on top of itself
-fden(1.1,Y, J(10,1,2))                // weight = 2
-
-
-
-mata describe
-
-end
-/* * * * *  END OF MATA BLOCK * * * * */
-
-
-
-
-
-* test cic_vce_parse
-cic_vce_parse, vce(boot, reps(1000) saving(myfile.dta, replace) sepercent)
-return list
-cap nois cic_vce_parse, vce(none, reps(25))
-return list
-cic_vce_parse, vce(boot, reps(25) mse accel(myvector) saving("c:\temp\test.dta", replace))
-return list
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -303,42 +154,54 @@ cap nois bootstrap [continuous]_b[mean], reps(20) strata(high after) : cic y hig
 // test jacknife
 jacknife: cic y high after if uniform()<.1
 
-// check weights are working
-gen testweight =(uniform()<.95) + (uniform()<.20)
-tab testweight
-cic y  high after [fw=testweight],  at(25 50 75 90)
-drop if testweight==0
-expand testweight
-cic y  high after                ,  at(25 50 75 90)
-cic y  high after                ,  at(25 50 75 90)
+// check fweights are working
+// I should get the same results if I use fweights or if I expand the datset
+preserve
+  gen testweight =(uniform()<.95) + (uniform()<.20)
+  tab testweight
+  cic y  high after [fw=testweight],  at(25 50 75 90)  `vce'
+  drop if testweight==0
+  expand testweight
+  cic y  high after                ,  at(25 50 75 90)  `vce'
+restore
+
+// check other weights are working
+preserve
+  gen  testweight = max(0,rnormal(1.25,.05))
+  summ testweight
+  cic y  high after [iw=testweight],  at(25 50 75 90)  `vce'
+  cic y  high after [aw=testweight],  at(25 50 75 90)  `vce'
+  cap nois cic y  high after [pw=testweight],  at(25 50 75 90)  `vce'
+  cap nois cic y  high after [pw=testweight],  at(25 50 75 90)  vce(none)
+restore
+
+// check it works with svy bootstrap.
+// This example is just quick-and-dirty.
+// It does not account for the fact that you might want to include strata(high after) in some applications.
+preserve
+  forvalues i = 1/100 {
+	gen  testweight`i' = max(0,rnormal(1.25,.05))
+	local testweightlist `testweightlist' testweight`i'
+  }
+  bys  high after: gen rownum=_n
+  xtile gid=rownum, nq(10)
+  svyset gid, bsrweight(`testweightlist') vce(bootstrap)
+  svy : cic y high after
+restore
 
 
 // direct comparision of vce() options
 est restore a
-
+cic
 set seed 1
-cic y high after, vce(bootstrap, reps(`Nreps') sepercentile)
-
-
-
-// we should get an error if try to use weights
-cap nois {
-  cic y  high after [fw=testweight],  at(25 50 75 90) vce(bootstrap, reps(25) nodots)
-}
-
-// we should get an error with vce(delta) since I haven't coded it up yet
-cap nois cic  y high after ,   vce(delta)
-
-
-ereturn list
-
-
-log close
-exit 
+cic y high after, vce(boot, reps(`Nreps') sepercentile)
+cic y high after, vce(delta)
+cic y high after, vce(none)
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-* The following code can be used to test the program using "fake" data
+* The following code can be used to test the program using another 
+* "fake" data set
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 sysuse nlsw88, clear
 set seed 1
@@ -369,9 +232,162 @@ replace d = 0.50 - 1.0 * y if t==1 & p==1
 replace d = round(d,.01)
 cic d treat post,  at(10(10)90) vce(b)
 
-exit
-
-*set trace on
 cicgraph , name(r1)
 cicgraph , ci(ci_percentile) name(r2)
+
+
+
+
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+* The following code tests various sub-functions
+* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+
+/* * * * *  BEGIN MATA BLOCK * * * * */
+version 11.2
+mata:
+mata set matastrict on
+mata set matafavor speed
+mata set matalnum on /* drop this later */
+
+"check prob"
+prob((1\1\2\3),(1\2\3\4\5))
+prob((1\1\2\3),(1\2\3\4\5),(1\1\2\1))
+prob((1\  2\3),(1\2\3\4\5),(2  \2\1))
+prob((1\  2\3),(1\2\3\4\5),(1.5\1.5\.75))
+
+"check cdfinv & cdfinv_brckt"
+P  = (.1\.3\.6\.7\1.0)
+YS = (1\2\3\4\5)
+/* 1    = */ cdfinv(.05  , P, YS)
+/* 1    = */ cdfinv(.1   , P, YS)
+/* 2    = */ cdfinv(.2   , P, YS)
+/* 2    = */ cdfinv(.2999, P, YS)
+/* 2    = */ cdfinv(.3   , P, YS)
+/* 3    = */ cdfinv(.3001, P, YS)
+/* 5    = */ cdfinv(.9999, P, YS)
+/* 5    = */ cdfinv(1    , P, YS)
+
+/* -499 = */ cdfinv_brckt(.05  , P, YS)
+/* 1    = */ cdfinv_brckt(.1   , P, YS)
+/* 1    = */ cdfinv_brckt(.2   , P, YS)
+/* 1    = */ cdfinv_brckt(.2999, P, YS)
+/* 2    = */ cdfinv_brckt(.3   , P, YS)
+/* 2    = */ cdfinv_brckt(.3001, P, YS)
+/* 4    = */ cdfinv_brckt(.9999, P, YS)
+/* 5    = */ cdfinv_brckt(1    , P, YS)
+
+
+// YS
+// bs_draw_nowgt(YS)
+// bs_draw_nowgt(YS,(10\1\1\1\0))
+
+
+// check draw sample
+YS = (1\2\3\4\5\6\7\8)
+N00=N01=N10=N11=2
+for (i=1; i<=1000; i++) {
+	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11)
+	if (i==1) bs_draw
+	if (i==1) avg = bs_draw'
+	else      avg = (avg \ bs_draw')
+}
+meanvariance(avg)'
+colmin(avg)'
+colmax(avg)'
+
+popsize=rows(YS)
+tempwgt = (1\9\1\9\1\9\1\9)
+cumsum00 = quadrunningsum(tempwgt[1\2])
+cumsum01 = quadrunningsum(tempwgt[3\4])
+cumsum10 = quadrunningsum(tempwgt[5\6])
+cumsum11 = quadrunningsum(tempwgt[7\8])
+popsize00 = round(cumsum00[N00]) // the number of obs. in each group is rounded to the nearest integer
+popsize01 = round(cumsum01[N01])
+popsize10 = round(cumsum10[N10])
+popsize11 = round(cumsum11[N11])
+cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
+cumsum01 = cumsum01/cumsum01[N01]
+cumsum10 = cumsum10/cumsum10[N10]
+cumsum11 = cumsum11/cumsum11[N11]
+
+cumsum00
+popsize00
+
+for (i=1; i<=1000; i++) {
+	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+	if (i==1) bs_draw
+	if (i==1) avg = bs_draw'
+	else      avg = (avg \ bs_draw')
+}
+meanvariance(avg)'
+colmin(avg)'
+colmax(avg)'
+
+popsize=1000
+cumsum00 = quadrunningsum(tempwgt[1\2])
+cumsum01 = quadrunningsum(tempwgt[3\4])
+cumsum10 = quadrunningsum(tempwgt[5\6])
+cumsum11 = quadrunningsum(tempwgt[7\8])
+popsize00 = round(cumsum00[N00]/colsum(tempwgt)*popsize) // the number of obs. in each group is rounded to the nearest integer
+popsize01 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
+popsize10 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
+popsize11 = round(cumsum00[N00]/colsum(tempwgt)*popsize)
+cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
+cumsum01 = cumsum01/cumsum01[N01]
+cumsum10 = cumsum10/cumsum10[N10]
+cumsum11 = cumsum11/cumsum11[N11]
+
+
+cumsum00
+popsize00
+
+for (i=1; i<=100; i++) {
+	bs_draw = bs_draw_wgt((1\2),(3\4),(5\6),(7\8),N00, N01, N10, N11,  cumsum00, cumsum01, cumsum10, cumsum11, popsize00, popsize01, popsize10, popsize11)
+	if (i==1) bs_draw
+	if (i==1) avg = bs_draw'
+	else      avg = (avg \ bs_draw')
+}
+meanvariance(avg)'
+colmin(avg)'
+colmax(avg)'
+
+cumdfinv((1::10), .94          )
+cumdfinv((1::10), .94,          J(10,1,1))
+cumdfinv((1::10), .9           )
+cumdfinv((1::10), .9 ,          J(10,1,1))
+
+cumdfinv((1::9) , .94          ,(2\J(8,1,1)))
+cumdfinv((1::9) , .84          ,(J(8,1,1)\2))
+cumdfinv((1::9) , .9           ,(2\J(8,1,1)))
+cumdfinv((1::9) , .8           ,(J(8,1,1)\2))
+
+// test fden w/ this vector
+Y= ( 1.11 \ 1.1 \ 1.2 \ 1.3 \ 5 \ 5.1 \ 5.2 \ 10 \ 10 \ 10 )
+
+// the following three should all equal 0.072278
+fden(1.1,Y)                           // no weights
+fden(1.1,Y, J(10,1,1) )               // weight = 1
+fden(1.1,Y[1..8], (J(7,1,1) \ 3) )    // weight = 1, except handle three "10" at bottom
+
+// the following two should equal  0.076557
+fden(1.1,(Y\Y))                       // stack Y on top of itself
+fden(1.1,Y, J(10,1,2))                // weight = 2
+
+
+
+mata describe
+
+end
+/* * * * *  END OF MATA BLOCK * * * * */
+
+
+* test cic_vce_parse
+cic_vce_parse, vce(boot, reps(1000) saving(myfile.dta, replace) sepercent)
+return list
+cap nois cic_vce_parse, vce(none, reps(25))
+return list
+cic_vce_parse, vce(boot, reps(25) mse accel(myvector) saving("c:\temp\test.dta", replace))
+return list
+
+log close
 
