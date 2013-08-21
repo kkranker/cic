@@ -1,5 +1,3 @@
-clear all
-
 *! $Id$
 *! Changes-in-changes
 *!
@@ -29,10 +27,10 @@ clear all
 *    at(numlist)              a list of percentiles for CIC results. default is at(10(10)90)
 *    vce(none|                don't calculate standard errors, the default
 *        delta|               use numerical
-*        bootstrap[, bsopts]| use bootstrap (by default, 1000 reps stratified by treat/post) other options allowed
+*        bootstrap[, bsopts]) use bootstrap (by default, 1000 reps stratified by treat/post) other options allowed
 *    did                      calculated traditional DID and quantile DID (always on if there are any control variables)
-*    untreated                counterfactual effect of the policy for the untreated group (Setion 3.2 of paper)
-*    round(integer)           round dependent variable to nearest r (=0 for no rounding, the default)
+*    untreated                counterfactual effect of the policy for the untreated group (Setion 3.2 of the A&I paper)
+*    round(#)                 round dependent variable to in # units (=0 for no rounding, the default)
 *                             this rounding is performed after adjusting for covariates, if applicable
 *
 *  REPORTING
@@ -53,20 +51,27 @@ clear all
 *     accel(vector)                acceleration values for each statistic
 *     mse                          use MSE formula for variance estimation
 *     nodots                       suppress the replication dots
-*     pop(#)                       total sample size (used for scaling iweights for bootstrap replications)
-*                                      the sample in each group is calculated as the sum of the iweights for observations in the group, divided by the sum of the iweights for all observations, and multiplied by the population size
+*     size(#)                      draw samples of size #
+*                                      without weights, the sample in each group is calculated as the number of observations in the group
+*                                      with fweights, the sample in each group is calculated as the sum of the fweights for observations in the group
+*                                      with iweights, the sample in each group is calculated as the sum of the iweights for observations in the group, divided by the sum of the weights for all observations, and multiplied by the value specified in size()  (rounded to the nearest integer).
+*                                             (by default, size()==the sum of the iweights)
+*                                      with pweights and aweights, the weights are normalized to mean 1. Then, the sample in each group is calculated as the sum of the weights for observations in the group (rounded to the nearest integer).
+*                                   This sub-option is allowed only with pweights, aweights, and iweights. With unweighted samples, you could generate a variable equal to one and use it as an iweight.
+*  The BS sub-options are ignored if you specify vce(none) or vce(delta).
 *  See [R] bootstrap postestimation for features available after estimation.
 
 
 * Weights may be iweights or fweights.
 
-* vce(bootstrap, [bsopts]) is equivalent to
+* vce(bootstrap, [bsopts]) is equivalent to the [bootstrap:] prefix as follows:
 *    . bootstrap _b, strata(treat post) [bsopts]: cic y treat post ... , vce(none)
 * but slower because vce(bootstrap) is implimented in META and runs with less overhead.
 * However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other options.
 * in documentation, talk about why bootstrap: prefix might be needed (longitudinal data, sample by id instead of pre/post groups)
+* CIC also works with the [svy bootstrap:] prefix, but you will need to use svyset to set up the bsrweight() variables, PSUs, weights and strata before calling CIC.
 
-* When by is used, only the last group is saved in ereturn.
+* When the [by:] prefix is used, only the last group is saved in ereturn.
 
 
 
@@ -79,11 +84,12 @@ clear all
 * 7. for labels and documentation and cic graph, figure out what to call the 4 models.
 * 8. cic_caller - does it really need arguements at all?
 * 9. did + untreated: are the signs right?
+* 10. multiple time periods or >2 groups.
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 
 
-program cic, properties(mi) eclass byable(onecall)
+program cic, properties(mi svyb) eclass byable(onecall)
 	version 11.2
 	if replay() {
 		if ("`e(cmd)'"!="cic") error 301
@@ -103,7 +109,7 @@ program define Estimate, eclass byable(recall)
 	version 11.2
 
 	// parse arguments
-	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fweight iweight aweight]  ///
+	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fweight iweight aweight pweight]  ///
 		[, at(numlist min=1 >=0 <=100 sort) ///
 		Vce(passthru) ///
 		did ///
@@ -132,41 +138,57 @@ program define Estimate, eclass byable(recall)
 	cic_vce_parse, `vce'
 	local vce     = r(vce)
 	local bsreps  = r(bsreps)
-	local bsiwpop = r(bsiwpop)
+	local bssize  = r(bssize)
 	local dots    = r(dots)
 	if !missing(r(bsopts)) local bsopts = r(bsopts)
 	if !missing(r(saving)) local saving = r(saving)
 	local sepercentile = (r(sepercentile)==1)
+	if ("`vce'"=="bootstrap" & `bssize'!=0 & !inlist("`wgtvar'","iweight","pweight","aweight")) {
+		di as err "vce(`vce', size(`size')) is only allowed with iweight , pweight , and aweight. With unweighted samples, you could generate a variable equal to one and use it as an iweight."
+		error 101
+	}
 
 	// prep to handle weights
 	if !missing("`weight'") {
 		tempvar wgtvar
 		gen `wgtvar'`exp' if `touse'
-		summ `wgtvar' if `touse' , meanonly
-		if "`wgtvar'"=="iweight" {
-			if ("`vce'"=="bootstrap" & `bsiwpop'==0) {
-				di as error "If bootstrapping standard errors with iweights, you must use the vce(bootstrap, pop(N)) suboption to declare the population size."
-				error 198
-			}
-			local wtexp_caller = `", "`wgtvar'", `bsiwpop' "'
-			local n=round(r(sum))
+		summ `wgtvar' if `touse', meanonly
+	}
+	if inlist("`weight'","iweight")  {
+		if ("`vce'"=="bootstrap" & `bssize'==0) {
+			local bssize = r(sum)
+			di as txt "(When bootstrapping standard errors with iweights, the sub-option vce(bootstrap, size(`=round(`bssize',.001)')) was used by default, where `=round(`bssize',.001)' is the sum of the iweights.)"
 		}
-		else if "`wgtvar'"=="aweight" {
-			summ `wgtvar' if `touse', meanonly
-			qui replace `wgtvar' = `wgtvar' / r(mean)
-			local wtexp_caller = `", "`wgtvar'", `=r(N)' "'
-			local n=round(r(sum))
-		}
-		else {
-			local wtexp_caller = `", "`wgtvar'", `bsiwpop' "' // fweight
-			local n=round(r(sum))
-		}
-		if ("`vce'"=="delta" & "`weight'"!="fweight") {
+		local wtexp_caller = `", "`wgtvar'", `bssize' "'
+		local n=round(r(sum))
+		if ("`vce'"=="delta") {
 			di as err "vce(delta) is not allowed with `weight's."
-			error 198
+			error 101
 		}
 	}
+	else if inlist("`weight'","aweight","pweight") {
+		qui replace `wgtvar' = `wgtvar' / r(mean)
+		if ("`vce'"!="none" & "`weight'"=="pweight") {
+			di as err "vce(`vce') is not allowed with `weight's."
+			error 101
+		}
+		qui count if `touse'
+		local n=r(N)
+		if ("`vce'"=="bootstrap" & `bssize'==0) {
+			local bssize = r(N)
+			di as txt "(When bootstrapping standard errors with aweights and pweights, the weights are normalized to mean=1 and the sub-option vce(bootstrap, size(`bssize')) sub-option was used by default, where `bssize' is the number of observations.)"
+		}
+		local wtexp_caller = `", "`wgtvar'", `bssize' "'
+	}
+	else if inlist("`weight'","fweight") {
+		// fweight
+		local wtexp_caller = `", "`wgtvar'", `bssize' "' // fweight
+		local n=r(sum)
+		cap assert `wgtvar'==round(`wgtvar')
+		if _rc error 401
+	}
 	else {
+		// no weights
 		qui count if `touse'
 		local n=r(N)
 	}
@@ -267,9 +289,9 @@ program define cic_vce_parse, rclass
 
 	return local vce `vce'
 	if ("`vce'"=="bootstrap") {
-		syntax [, Reps(integer 200) pop(integer 0) SAving(string asis) NODots SEPercentile *]
+		syntax [, Reps(integer 200) size(real 0) SAving(string asis) NODots SEPercentile *]
 		return scalar bsreps  = `reps'
-		return scalar bsiwpop = `pop'
+		return scalar bssize = `size'
 		return scalar dots  = ( "nodots"!="`dots'" )
 		return scalar sepercentile = ( "sepercentile"=="`sepercentile'" )
 		return local  saving  : copy local saving
@@ -312,7 +334,6 @@ struct did_result {
 void cic_caller(string rowvector varlist, string scalar touse_var, string scalar at_local, real scalar did, real scalar tot, real scalar bsreps, real scalar dots, real scalar round, |string scalar wgt_var, real scalar popsize)
 {
 	// Inputs:
-
 	//   1.   Name of variables, in the following order:
 	//         - dependent variable, `y'
 	//         - treatment dummy (0/1 for control/treatment groups)
@@ -332,7 +353,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	//   8.  Round y to the nearest ___.  (set =0 for no rounding).
 	//   (Optional)
 	//   9.  Name of variable with fweight or iweight
-	//   10. Set to 0 if using fweights.  Provide population size for scaling iweights. (This is only used if bootstrapping SEs.)
+	//   10. Set to 0 if using fweights.  Provide population size for scaling i/p/aweights. (This is only used if bootstrapping SEs.)
 	// Output: Output is returned to stata through various st_*() functions.
 
 	// Read y, treat and post into mata
@@ -358,7 +379,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	if (args()!=8) {
 		real colvector wgt
 		st_view(wgt=.,.,wgt_var,touse_var)
-		if (args()==9) popsize=0
+		if (args()<10) popsize=0
 	}
 	else wgt=1
 
@@ -472,7 +493,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 		else     bsdata=J(bsreps,4*(1+length(at)),.)
 
 		// Before loop, extra setup needed for drawing a sample with unequal weights
-		if (args()!=8) {
+		if (args()>8) {
 			// weight variables with cumulative sum of the weights from each group
 			real colvector cumsum00, cumsum01, cumsum10, cumsum11
 			cumsum00 = quadrunningsum(wgt[p00])
@@ -483,7 +504,9 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 			// scalars with population size for each group
 			real scalar popsize00, popsize01, popsize10, popsize11
 			if (popsize) {
-				// With importance weights, use the fraction of popsize (e.g., popsize00 = round(cumsum00[n00]/colsum(wgt)*popsize))
+				// With weights (other than frequency weights), use the fraction of popsize in the group (e.g., popsize00 = round(cumsum00[n00]/colsum(wgt)*popsize))
+				// with iweghts, popsize==sum of the weights by default.
+				// With pweights or aweights, sumwgt==popsize by default, so the sum of the weights is just the sum of the weights, rounded to the nearest integer
 				real scalar sumwgt
 				sumwgt = quadcolsum(wgt)
 				popsize00 = round(cumsum00[N00]/sumwgt*popsize) // the number of obs. in each group is rounded to the nearest integer
@@ -497,13 +520,13 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 				popsize01 = cumsum01[N01]
 				popsize10 = cumsum10[N10]
 				popsize11 = cumsum11[N11]
-				if (round(popsize00)!=popsize00 | round(popsize01)!=popsize01 | round(popsize10)!=popsize10 | round(popsize11)!=popsize11) "When drawing bootstrap sample with frequency weights, found non-integer fweights in one or more groups."
+				if (round(popsize00)!=popsize00 | round(popsize01)!=popsize01 | round(popsize10)!=popsize10 | round(popsize11)!=popsize11) "When drawing bootstrap sample with frequency weights, non-integer fweights were found."
 			}
 			cumsum00 = cumsum00/cumsum00[N00] // normalize to sum to one within groups
 			cumsum01 = cumsum01/cumsum01[N01]
 			cumsum10 = cumsum10/cumsum10[N10]
 			cumsum11 = cumsum11/cumsum11[N11]
-			if (min((popsize00,popsize01,popsize10,popsize11))<2) "One or more groups has size less than 2. There will be no variation in bootstrap draws."
+			if (min((popsize00,popsize01,popsize10,popsize11))<2) "One or more groups has size <=1. There will be no variation in bootstrap draws."
 		}
 
 		// header for dots
@@ -600,17 +623,20 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 		  stata(( "qui save " + bstempfile ))
 		stata( "restore" )
 	} // done bootstrapping
+
 	else if (bsreps==-1) {
+
+		// Standard errors calcuated via the Delta Method
 		real matrix V_delta
 		V_delta = se_cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],result)
+
+		// turn from a 1x4 vector into a square matrix with the same number of columns as e(b), then post back into Stata
 		V_delta  = (( V_delta[1], J(1,length(at),0), V_delta[2], J(1,length(at),0), V_delta[3], J(1,length(at),0), V_delta[4], J(1,length(at),0)))
 		if (did) V_delta = (J(1,rows(didlabels)+1+rows(qdidlabels),0),V_delta)
 		st_matrix(st_local("mata_V"),diag(V_delta))
 		st_matrixcolstripe(st_local("mata_V"), ciclabels)
 		st_matrixrowstripe(st_local("mata_V"), ciclabels)
 	}
-	else if (bsreps==0) "Specify vce() option to calculate standard errors."
-	else _error( "bsreps invalid.")
 
 } // end of cic_caller; everthing is returned to Stata with st_*() commands.
 
@@ -1279,9 +1305,9 @@ real rowvector se_cic(real colvector Y00, real colvector Y01, real colvector Y10
 
 // PARELLEL FUNCTION TO CIC() WITH MORE LEGIBLE CODE
 
-// The code in cic() is somewhat convoluted because I am calculating all four vectors simultaneously. Fordocumentation, I have 
-// written an alternative routine, cic_seperate(), which much more clear/accessible. It has the same inputs as cic() and simply 
-// calls a seperate sub-routine for each of the four estimators, each of which has it's own function. The cic_seperate() function 
+// The code in cic() is somewhat convoluted because I am calculating all four vectors simultaneously. Fordocumentation, I have
+// written an alternative routine, cic_seperate(), which much more clear/accessible. It has the same inputs as cic() and simply
+// calls a seperate sub-routine for each of the four estimators, each of which has it's own function. The cic_seperate() function
 // produces identical results to cic(); I checked when writing the program.  However redundant calculations lead to slower runtimes.
 // All of the code for cic_seperate() is commented out, except for cic_dci(), which is called by cic_se().
 
