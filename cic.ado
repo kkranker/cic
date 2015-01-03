@@ -246,8 +246,7 @@ program define Estimate, eclass byable(recall)
 		ereturn post `mata_b' [`weight'`exp'], depname(`y') obs(`n') esample(`touse') dof(`=`n'-colsof(`mata_b')') `level'
 		ereturn display
 	}
- 	ereturn local depvar  "`y'"
- 	ereturn local vce     "`vce'"
+
 	if (`: list sizeof varlist'!=0 | `runDID') {
 		ereturn scalar k_eq =  5
 		ereturn local  eqnames continuous discrete_ci dci_lower_bnd dci_upper_bnd did
@@ -259,6 +258,9 @@ program define Estimate, eclass byable(recall)
 	if "`untreated'"=="" ereturn local footnote "Effect of Treatment on the Treated Group"
 	else                 ereturn local footnote "Effect of Treatment on the Untreated Group"
 	di as txt "(" e(footnote) ")"
+	
+	ereturn local depvar  "`y'"
+ 	ereturn local vce     "`vce'"
 
 end // end of cic program definition
 
@@ -312,12 +314,18 @@ program define cic_vce_parse, rclass
 end
 
 
-/* * * * *  BEGIN MATA BLOCK * * * * */
-version 11.2
+/* * * * *  MATA SETTINGS FOR TESTING PURPOSES ONLY * * * * */
+
 mata:
 mata clear
 mata set matastrict on
 mata set matafavor speed
+end
+
+
+/* * * * *  BEGIN MATA BLOCK * * * * */
+version 11.2
+mata:
 
 // STRUCTURES FOR RETURNING RESULTS
 struct cic_result {
@@ -431,7 +439,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 	if (args()==8) result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at) // without weights
 	else           result=cic((*Y)[p00],(*Y)[p01],(*Y)[p10],(*Y)[p11],at,wgt[p00],wgt[p01],wgt[p10],wgt[p11]) // with weights
 
-	// return results into a Stata matrix named st_local("mata_b") with lables
+	// return results into a Stata matrix named st_local("mata_b") 
 	if (did) {
 		if (tot) st_matrix(st_local("mata_b"),  (didresult.coef',didresult.did,qdid_result,result.con,result.dci,result.dcilowbnd,result.dciuppbnd))
 		else     st_matrix(st_local("mata_b"), -(didresult.coef',didresult.did,qdid_result,result.con,result.dci,result.dciuppbnd,result.dcilowbnd))
@@ -451,6 +459,7 @@ void cic_caller(string rowvector varlist, string scalar touse_var, string scalar
 		ciclabels = ( didlabels \ ( "did", "did" ) \ qdidlabels \ ciclabels )
 	}
 	st_matrixcolstripe(st_local("mata_b"), ciclabels)
+	st_matrixrowstripe(st_local("mata_b"), J( rows(st_matrix(st_local("mata_b"))), 1 , ("", st_local("y"))) )
 	st_local("cic_coleq"   ,invtokens(ciclabels[.,1]'))
 	st_local("cic_colnames",invtokens(ciclabels[.,2]'))
 
