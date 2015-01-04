@@ -13,15 +13,22 @@ program define cicgraph, sortpreserve rclass
 			/// ci() expecting normal, percentile, bc, or bca. However cicgraph will still
 			/// work if there is a conforming matrix named e(ci_`ci').
 			/// cicgraph might give strange error messages if e(ci_`ci')
-			/// by default, -normal- is used if matrix e(ci_normal) exists
+			/// ci(none) suppresses confidence intervals
+			/// by default, -normal- is used if matrix e(ci_normal) exists. 
+			///      if it e(ci_normal) not exist, options e(ci_percentile) if available
 			/// This will work whether or not you include "ci_"  (e.g., "ci_normal" and "normal" are both valid)
-		Equations(namelist) /// {continuous, discrete_ci, dci_lower_bnd, and/or dci_upper_bnd}
+		Equations(namelist) /// {continuous, discrete_ci, dci_lower_bnd, dci_upper_bnd, and/or qdid}
+		                    /// default is all the equations available
 		Name(string) /// graph names; default is name(cicgraph)
 			/// if >1  name in equations(), name is treated as a prefix.
-			/// graphs in memory will be replaced.
+			/// default is name(cicgraph, replace)
 		*]
 
-	if ("`e(cmd)'"!="cic") | (lower(e(vcetype))!="bootstrap") error 301
+	cap assert ("`e(cmd)'"=="cic")
+	if _rc {
+		di as error "cicgraph was written as a post-estimation command for cic."
+		error 301
+	}
 
 	// pull coefficients
 	tempname b int
@@ -31,9 +38,16 @@ program define cicgraph, sortpreserve rclass
 	svmat `b' , names("`coef'")
 
 	// cic option
-	cap qui di colsof(e(ci_normal))
-	if !_rc & mi("`ci'")         local ci "normal"
+	if mi("`ci'") {
+		cap qui di colsof(e(ci_normal))
+		if !_rc local ci "normal"
+		else {
+			cap qui di colsof(e(ci_percentile))
+			if !_rc local ci "ci_percentile"
+		}
+	}
 	if regexm("`ci'","^ci_(.*)") local ci = regexs(1) // if someone types ci_normal instead of normal, drop the "ci_"
+	cap qui di colsof(e(ci_normal))
 	if !mi("`ci'") {
 		if !inlist("`ci'","normal","percentile","bc","bca") di as txt "ci() expecting normal, percentile, bc, or bca. However it will work if there is a conforming matrix named e(ci_`ci')"
 		matrix `int' =  e(ci_`ci')
@@ -42,16 +56,18 @@ program define cicgraph, sortpreserve rclass
 		svmat `int',
 	}
 	else {
-		gen `int'1=.
-		gen `int'2=.
+		qui gen `int'1=.
+		qui gen `int'2=.
 	}
 
 	// size of e(b)
 	local rows = rowsof(`b')
 	if (c(N) < `rows') set obs `rows'
-	if (!mi("`ci'") & (rowsof(`int')!=rowsof(`b') | colsof(`int')!=2)) {
-		di as error "e(ci_`ci') has the incorrect number of rows or columns."
-		error 198
+	if !mi("`ci'") {
+		if (rowsof(`int')!=rowsof(`b') | colsof(`int')!=2) {
+			di as error "e(ci_`ci') has the incorrect number of rows or columns."
+			error 198
+		}
 	}
 
 	// labels
@@ -81,17 +97,22 @@ program define cicgraph, sortpreserve rclass
 	}
 
 	// graph results
-	if mi("`equations'") local equations continuous discrete_ci dci_lower_bnd dci_upper_bnd
-	if !mi("`name'")     _parse comma name name_rhs:  name
-	if mi("`name'")      local name "cicgraph"
+	if mi("`equations'") {
+		local equations : list uniq eqns
+		local equations : subinstr local equations "did_model" ""
+		local equations : subinstr local equations "did"       ""
+	}
+	if mi("`name'") local name "cicgraph, replace"
+	_parse comma name name_rhs:  name
 	local c=1
 	foreach eqnname of local equations {
-		if      "`eqnname'"=="continuous"    local eqnlabel "CIC model with continuous outcomes"
-		else if "`eqnname'"=="discrete_ci"   local eqnlabel "CIC model with discrete outcomes (under the conditional independence assumption)"
-		else if "`eqnname'"=="dci_lower_bnd" local eqnlabel "Discrete CIC model lower bound (without conditional independence)"
-		else if "`eqnname'"=="dci_upper_bnd" local eqnlabel "Discrete CIC model upper bound (without conditional independence)"
+		if      "`eqnname'"=="continuous"    local eqnlabel "Continuous CIC model"
+		else if "`eqnname'"=="discrete_ci"   local eqnlabel "Discrete CIC model (under the conditional independence assumption)"
+		else if "`eqnname'"=="dci_lower_bnd" local eqnlabel "Lower bound for the discrete CIC model (without conditional independence)"
+		else if "`eqnname'"=="dci_upper_bnd" local eqnlabel "Upper bound for the discrete CIC model (without conditional independence)"
+		else if "`eqnname'"=="qdid"          local eqnlabel "Quantile DID model"
 		else {
-			di as error "eqnname() should be continuous, discrete_ci, dci_lower_bnd, dci_upper_bnd"
+			di as error "eqnname() should be continuous, discrete_ci, dci_lower_bnd, dci_upper_bnd, and/or qdid"
 			error 198
 		}
 		if wordcount(`"`equations'"') == 1 local graphname `name'
@@ -116,5 +137,7 @@ program define cicgraph, sortpreserve rclass
 	return local cmd       cicgraph
 	return local name      `graphnamelist'
 	return local equations `equations'
-	return local ci        ci_`ci'
+	if mi("`ci'") return local ci none
+	else          return local ci ci_`ci'
+	
 end // end of cicgraph program definition
