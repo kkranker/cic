@@ -4,7 +4,8 @@
 *! Last updated $Date$
 
 clear all
-cd "C:\Users\kkranker\Documents\Dissertation\Stata-Changes-in-Changes"
+cap    nois cd "C:\Users\keith\Desktop\cic"
+if _rc nois cd "C:\Users\kkranker\Documents\Dissertation\Stata-Changes-in-Changes"
 include cic.ado
 
 
@@ -15,7 +16,7 @@ if 0  set trace on
 else  set trace off
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 local Nreps = 200
-if 01     	local vce vce(bootstrap, reps(`Nreps'))
+if 01     	local vce "vce(bootstrap, reps(\`Nreps'))"
 else       	macro drop _vce
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
@@ -66,8 +67,6 @@ log using cic_benchmark_testing.log, replace
 
 mac list _Nreps _vce
 
-
-
 // Table 1
 count
 tabstat y ly , by(high_after) s(count mean sd min p25 p50 p75 p90 max) columns(s)  labelwidth(30) nototal format(%9.2f)
@@ -76,31 +75,32 @@ tabstat y ly , by(high_after) s(count mean sd min p25 p50 p75 p90 max) columns(s
 reg y high##after
 reg ly high##after
 
-// CIC estimates from A&I Appendix
+// cic estimates from A&I Appendix
 // Table 2
 timer on 2
-cic  y high after ,  at(25 50 75 90) `vce' did
-cic ly high after ,  at(50)          `vce' did
+cic all  y high after ,  at(25 50 75 90) `vce' did
+cic all ly high after ,  at(50)          `vce' did
 timer off 2
 timer list 2
 
 
+
 // Table 3
 timer on 3
-cic  y high after ,  at(25 50 75 90) `vce' untreated did
-cic ly high after ,  at(50)          `vce' untreated did
+cic all  y high after ,  at(25 50 75 90) `vce' untreated did
+cic all ly high after ,  at(50)          `vce' untreated did
 timer off 3
 timer list 3
 
 // graphs
-cic  y high after ,  at(1 5(2.5)90) `vce'
+cic all  y high after ,  at(1 5(2.5)90) `vce'
 ereturn list
 cicgraph,  name(g) e(continuous discrete_ci dci_lower_bnd dci_upper_bnd)
 
 
 // VCE via delta metho
-cic  y high after, vce(delta)     at(25 50 75 90)
-cic  y high after, vce(delta) did at(25 50 75 90)
+cic all  y high after, vce(delta)     at(25 50 75 90)
+cic all  y high after, vce(delta) did at(25 50 75 90)
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -108,11 +108,11 @@ cic  y high after, vce(delta) did at(25 50 75 90)
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 * Basic
-cic  y high after, at(5(10)95) `vce' did
+cic all  y high after, at(5(10)95) `vce' did
 
 * With control variables
 egen agegroup = cut(age), group(7)
-cap nois cic  y high after i.agegroup, did `vce' round(.25)
+cic all  y high after i.agegroup, did `vce' round(.25)
 
 * Test recall
 cic
@@ -121,20 +121,18 @@ cicgraph , name(r0)
 * With weights
 gen tempweight = 1
 replace tempweight = 2 in 1
-cap nois cic ly high after [fw=tempweight], did  `vce'
+cic all ly high after [fw=tempweight], did  `vce'
 
 * With control variables and weights
 timer on 24
-cap nois cic ly high after i.agegroup [fw=tempweight], did `vce' round(.25)
+cic all ly high after i.agegroup [fw=tempweight], did `vce' round(.25)
 timer off 24
 timer list
-
-
 
 // compare vce() option above to the bootstrap prefix
 set seed 1
 timer on 10
-cic y high after, vce(bootstrap, reps(`Nreps'))
+cic all y high after, vce(bootstrap, reps(`Nreps'))
 timer off 10
 timer list 10
 ereturn list
@@ -144,35 +142,35 @@ cic // test replay works
 est store a
 
 timer on 12
-cap nois bootstrap, reps(`Nreps') strata(high after) : cic y high after
+cap nois bootstrap, reps(`Nreps') strata(high after) : cic all y high after
 timer off 12
 timer list 12
 
 // test if selected vars works
-cap nois bootstrap [continuous]_b[mean], reps(20) strata(high after) : cic y high after
+cap nois bootstrap [continuous]_b[mean], reps(20) strata(high after) : cic all y high after
 
 // test jacknife
-jacknife: cic y high after if uniform()<.1
+jacknife: cic all y high after if uniform()<.1
 
 // check fweights are working
 // I should get the same results if I use fweights or if I expand the datset
 preserve
   gen testweight =(uniform()<.95) + (uniform()<.20)
   tab testweight
-  cic y  high after [fw=testweight],  at(25 50 75 90)  `vce'
+  cic all y  high after [fw=testweight],  at(25 50 75 90)  `vce'
   drop if testweight==0
   expand testweight
-  cic y  high after                ,  at(25 50 75 90)  `vce'
+  cic all y  high after                ,  at(25 50 75 90)  `vce'
 restore
 
 // check other weights are working
 preserve
   gen  testweight = max(0,rnormal(1.25,.05))
   summ testweight
-  cic y  high after [iw=testweight],  at(25 50 75 90)  `vce'
-  cic y  high after [aw=testweight],  at(25 50 75 90)  `vce'
-  cap nois cic y  high after [pw=testweight],  at(25 50 75 90)  `vce'
-  cap nois cic y  high after [pw=testweight],  at(25 50 75 90)  vce(none)
+  cic all y  high after [iw=testweight],  at(25 50 75 90)  `vce'
+  cic all y  high after [aw=testweight],  at(25 50 75 90)  `vce'
+  cap nois cic all y  high after [pw=testweight],  at(25 50 75 90)  `vce'
+  cap nois cic all y  high after [pw=testweight],  at(25 50 75 90)  vce(none)
 restore
 
 // check it works with svy bootstrap.
@@ -186,7 +184,7 @@ preserve
   bys  high after: gen rownum=_n
   xtile gid=rownum, nq(10)
   svyset gid, bsrweight(`testweightlist') vce(bootstrap)
-  svy : cic y high after
+  svy : cic all y high after
 restore
 
 
@@ -194,13 +192,25 @@ restore
 est restore a
 cic
 set seed 1
-cic y high after, vce(boot, reps(`Nreps') sepercentile)
-cic y high after, vce(delta)
-cic y high after, vce(none)
+cic all y high after, vce(boot, reps(`Nreps') sepercentile)
+cic all y high after, vce(delta)
+cic all y high after, vce(none)
+
+// test various combinations of estimators/vce/graphs with graphs
+cic all    y high after ,  at(25 50 75) vce(bootstrap, reps(5))
+cicgraph, name(all)
+cic dci    y high after ,  at(25 50 75) vce(bootstrap, reps(5))
+cicgraph, name(dci)
+cic continuous y high after ,  at(25 50 75) vce(bootstrap, reps(5))
+cic bounds     y high after ,  at(25 50 75) vce(bootstrap, reps(5)) did
+cicgraph, name(bounds) eq(qdid dci_lower_bnd)
+cic continuous y high after ,  at(25 50 75) vce(none)
+cicgraph,name(novce) 
+
 
 
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-* The following code can be used to test the program using another 
+* The following code can be used to test the program using another
 * "fake" data set
 * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 sysuse nlsw88, clear
@@ -211,7 +221,7 @@ gen POST1 = uniform() < .5
 replace wage = wage - POST1
 
 // bootstrap the sample conditional on Ngt for g; t = 0; 1
-cic wage TREAT1 POST1 i.occupation,  at(10(10)90 99.5)
+cic all wage TREAT1 POST1 i.occupation,  at(10(10)90 99.5)
 
 
 
@@ -230,7 +240,7 @@ replace d = 0.75 - 0.5 * y if t==0 & p==1
 replace d = 0.80 - 0.4 * y if t==1 & p==0
 replace d = 0.50 - 1.0 * y if t==1 & p==1
 replace d = round(d,.01)
-cic d treat post,  at(10(10)90) vce(b)
+cic all d treat post,  at(10(10)90) vce(b)
 
 cicgraph , name(r1)
 cicgraph , ci(ci_percentile) name(r2)
