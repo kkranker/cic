@@ -277,7 +277,7 @@ program define Estimate, eclass byable(recall)
 	if "`untreated'"=="" ereturn local footnote "Effect of Treatment on the Treated Group"
 	else                 ereturn local footnote "Effect of Treatment on the Untreated Group"
 	di as txt e(footnote)
-	if `runDID'                                         di as txt "Traditional DID model" as res " [did], [did_model]" as txt " (`untreat' == 1 - `treat')"
+	if `runDID'                                         di as txt "Traditional DID model" as res " [did], [did_model]" as txt =cond(tot,""," (`untreat' == 1 - `treat')")
 	if `runDID'                                         di as txt "Quantile DID model" as res " [qdid]"
 	if inlist("`estimator'","all","continuous","check") di as txt "Continuous CIC model" as res " [continuous]"
 	if inlist("`estimator'","all","dci")                di as txt "Discrete CIC model (under the conditional independence assumption)" as res " [discrete_ci]"
