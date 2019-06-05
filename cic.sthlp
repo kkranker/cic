@@ -42,7 +42,7 @@
 
 
 {marker estimator}{...}
-{synoptset 16}{...}
+{synoptset 12}{...}
 {synopthdr:estimator}
 {synoptline}
 {synopt :{opt continuous}}CIC estimator with continuous outcomes (Athey and Imbens 2006, equation 9){p_end}
@@ -54,6 +54,7 @@
 
 {marker options}{...}
 {marker options_table}{...}
+{synoptset 16}{...}
 {synopthdr}
 {synoptline}
 {syntab:Main}
@@ -71,16 +72,17 @@ any rounding is performed after adjusting for covariates, if applicable{p_end}
 {synopt :{opt notab:le}}suppresses the table of results{p_end}
 {synopt :{opt noh:eader}}suppresses the table header{p_end}
 {synopt :{opt nol:egend}}suppresses the table legend{p_end}
-{synopt :{it:{help cic##display_options:display_options}}}control
-INCLUDE help shortdes-displayoptall
+{synopt :{it:{help cic##display_options:display_options}}}control columns and
+column formats, row spacing, line width, display of omitted variables and base and empty
+cells, and factor-variable labeling{p_end}
 {synoptline}
 {p2colreset}{...}
 {p 4 6 2}
 {it:varlist} may contain factor variables; see {help fvvarlists}.{p_end}
 {p 4 6 2}
-{opt bootstrap}, {opt by}, {opt jackknife}, and {opt statsby} are allowed;{p_end}
+{opt bootstrap}:, {opt by}:, {opt jackknife}:, and {opt statsby}: are allowed;{p_end}
 {p 4 6 2}
-Weights are not allowed with the {helpb bootstrap} prefix.{p_end}
+Weights are not allowed with the {help bootstrap}: prefix.{p_end}
 {marker weight}{...}
 {p 4 6 2}
 {opt fweight}s, {opt iweight}s, and {opt aweight}s are allowed; see {help weight}.{p_end}
@@ -88,10 +90,11 @@ Weights are not allowed with the {helpb bootstrap} prefix.{p_end}
 When the {opt by:} prefix is used, only the last group is saved in ereturn.{p_end}
 {p 4 6 2}
 {marker display_options}{...}
-{opt display_options} include: noomitted, vsquish, noemptycells, baselevels, and allbaselevels; see help estimation options##display_options{p_end}
+{opt display_options} include: noomitted, vsquish, noemptycells, baselevels, and allbaselevels;
+see {help estimation options##display_options:[R] estimation options}.{p_end}
 
 
-{synoptset 16}{...}
+{synoptset 25}{...}
 {synopthdr:bsopts}
 {synoptline}
 {synopt :{opt reps(#)}}                      perform # bootstrap replications; default is 1000{p_end}
@@ -106,17 +109,16 @@ When the {opt by:} prefix is used, only the last group is saved in ereturn.{p_en
 {p 4 6 2}
 {opt vce(bootstrap[, bsopts])} stratifies the sample by {it:tvar} and {it:pvar}{p_end}
 {p 4 6 2}
-The BS sub-options are ignored if you specify vce(none) or vce(delta).{p_end}
-{p 4 6 2}
 See {help bootstrap postestimation} for features available after estimation.{p_end}
 {p 4 6 2}
-vce(bootstrap, [bsopts]) is equivalent to the [bootstrap:] prefix as follows:{p_end}
-{p 4 10 8}
-. bootstrap _b, strata(treat post) [bsopts]: cic y treat post ... , vce(none){p_end}
-{p 4 8 0}but slower because vce(bootstrap) is implimented in META and runs with less overhead.
+The following two lines are equivalent:{p_end}
+{phang2}{cmd: . cic y treat post, vce(bootstrap, [bsopts])}{p_end}
+{phang2}{cmd: . bootstrap _b, strata(treat post) [bsopts]: cic y treat post, vce(none}){p_end}
+{p 4 8 0}However, the second line is slower because vce(bootstrap) is implemented in Mata and runs with less overhead.
 However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other options.{p_end}
 {p 4 6 2}
-CIC also appears to works with the [svy bootstrap:] prefix, but you will need to use svyset to set up the bsrweight() variables, PSUs, weights and strata before calling CIC.{p_end}
+CIC also appears to works with the {help svy bootstrap}: prefix, but you will need to use {help svyset} to set
+up the bsrweight() variables, PSUs, weights and strata before calling CIC.{p_end}
 {p 4 6 2}
 The sample size for {opt size(#)} is defined as follows:
 without weights, the sample in each group is calculated as the number of observations in the group;
@@ -173,11 +175,11 @@ The CIC model estimates the entire distribution of outcomes under the counterfac
 allowing one to calculate average treatment effects or estimate effects at specific quantiles.
 
 {pstd}
-This Stata command, `cic`,  implements the CIC estimator from Athey and Imbens (2006).
-`cic` is written in Mata with an effort to maximize parallel computing; in tests (not shown), I found `cic` estimated
-the model more quickly that the Matlab code previously distributed by the Athey and Imbens.
+This Stata command, {cmd:cic},  implements the CIC estimator from Athey and Imbens (2006).
+{cmd:cic} is written in Mata with an effort to maximize parallel computing; in tests (not shown), I found {cmd:cic} estimated
+the model more quickly that the Matlab code previously distributed by Athey and Imbens.
 The cic command also offers several previously unavailable features (e.g., to allow for covariates).
-In addition, you can use Stata's `bootstrap:` prefix, which offers more flexibility for
+In addition, you can use Stata's {help bootstrap}: prefix, which offers more flexibility for
 computing bootstrapped standard errors (e.g., strata, blocks).
 
 {pstd}
@@ -186,7 +188,7 @@ Athey and Imbens (2006) explain their methods (with proofs) in a fairly long and
 The appendix is also quite helpful.
 
 {pstd}
-Covaraiates  are implimented according to parametric approach outlined in section 5.1. of Athey and Imbens (2006).
+Covaraiates  are implemented according to the parametric approach outlined in section 5.1. of Athey and Imbens (2006).
 "... apply the CIC estimator to the residuals from an ordinary least squares regression with the effects of the dummy
 variables added back in." (p. 466)
 
@@ -203,13 +205,9 @@ variables added back in." (p. 466)
 {phang2}{cmd:. replace wage = wage - POST}{p_end}
 
 {pstd}Estimate{p_end}
-
 {phang2}{cmd:. cic continuous wage TREAT POST, vce(bootstrap, reps(50))}{p_end}
-
 {phang2}{cmd:. bootstrap, reps(50): cic all wage TREAT POST, at(50 90) did vce(none)}{p_end}
-
 {phang2}{cmd:. cic all wage TREAT POST, vce(delta) at(50)}{p_end}
-
 {phang2}{cmd:. cic dci wage TREAT POST i.occupation, at(50) vce(bootstrap, reps(50))}{p_end}
 
 
@@ -231,11 +229,11 @@ available at {browse "https://athey.people.stanford.edu/research"}
 Athey, Susan and Guido W. Imbens. "Identification and Inference in Nonlinear Difference-in-Differences Models." *Econometrica*, vol. 74, no. 2, March 2006, pp. 431-497. ({browse "http://dx.doi.org/10.1111/j.1468-0262.2006.00668.x"})
 
 {psee}
-Imbens, Guido W. and Jeffery M. Wooldridge. “Recent Developments in the Econometrics of Program Evaluation.” *Journal of Economic Literature*, vol. 47, no. 1, 2009, pp. 5–86. ({browse "http://dx.doi.org/10.1257/jel.47.1.5"})
+Imbens, Guido W. and Jeffery M. Wooldridge. "Recent Developments in the Econometrics of Program Evaluation." *Journal of Economic Literature*, vol. 47, no. 1, 2009, pp. 5–86. ({browse "http://dx.doi.org/10.1257/jel.47.1.5"})
 
 {psee}
-Kranker, Keith. “The Effect of Disease Management Programs on Medicaid Expenditures.” Doctoral dissertation. College Park, MD: University of Maryland, 2011. ({browse "http://hdl.handle.net/1903/12101"})
+Kranker, Keith. "The Effect of Disease Management Programs on Medicaid Expenditures." Doctoral dissertation. College Park, MD: University of Maryland, 2011. ({browse "http://hdl.handle.net/1903/12101"})
 
 {psee}
-Kranker, Keith. “Effects of Medicaid Disease Management Programs on Medical Expenditures: Evidence from a Natural Experiment in Georgia.” *Journal of Health Economics*, vol. 46, March 2016, pp. 52-69.
+Kranker, Keith. "Effects of Medicaid Disease Management Programs on Medical Expenditures: Evidence from a Natural Experiment in Georgia." *Journal of Health Economics*, vol. 46, March 2016, pp. 52-69.
 ({browse "http://dx.doi.org/10.1016/j.jhealeco.2016.01.008"}){p_end}
