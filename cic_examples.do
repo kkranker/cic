@@ -1,3 +1,8 @@
+*! cic_examples.do
+*! Changes-in-changes
+*! Exmple of how to use the command (from cic.sthlp)
+*! by Keith Kranker
+
 // setup
 sysuse nlsw88, clear
 set seed 1

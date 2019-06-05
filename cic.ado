@@ -1,96 +1,12 @@
-*! $Id$
+*! cic.ado
 *! Changes-in-changes
 *!
 *! An implimentation of:
 *! Athey, S. & G. W. Imbens. "Identification and Inference in Nonlinear Difference-in-Differences Models."
 *!     Econometrica, 74 (2), March 2006, pp. 431-497.
+*! Based on Matlab code by S. Athey & G. W. Imbens, published on S. Athey's website
 *!
 *! Stata code by Keith Kranker
-*! Based on Matlab code by S. Athey & G. W. Imbens, published on S. Athey's website
-*! Last updated $Date$
-*
-*  Syntax:
-*
-*  cic estimator y_var treat_var post_var [control_varlist] [if] [in] [using] [fwedw	ight iweight aweight] [, options]
-*
-*  where
-*    y_var                    is the dependent variable
-*    treat_var                is a dummy that equals 1 for the treatment group
-*    post_var                 is a dummy that equals 1 for the period in which the treatment group is treated
-*    control_varlist          is a list of control variables (optional)
-*                                  This is implimented according to parametric approach outlined in section 5.1. of AI.
-*                                  "apply the CIC estimator to the residuals from an ordinary least squares regression with the effects of the dummy variables added back in." (p. 466)
-*
-*  ESTIMATOR
-*      continuous             CIC ESTIMATOR WITH CONTINUOUS OUTCOMES, EQUATION 9
-*      dci                    CIC MODEL WITH DISCRETE OUTCOMES (UNDER THE CONDITIONAL INDEPENDENCE ASSUMPTION), EQUATION 29
-*      bounds                 LOWER and UPPER BOUND ESTIMATES OF DISCRETE CIC MODEL (WITHOUT CONDITIONAL INDEPENDENCE), EQUATION 25
-*      all                    all four of the above
-*
-*  OPTIONS
-*
-*  MAIN
-*    at(numlist)              a list of percentiles for CIC results. default is at(10(10)90)
-*    vce(none|                don't calculate standard errors, the default
-*        delta|               use numerical
-*        bootstrap[, bsopts]) use bootstrap (by default, 1000 reps stratified by treat/post) other options allowed
-*    did                      calculated traditional DID and quantile DID (always on if there are any control variables)
-*    untreated                counterfactual effect of the policy for the untreated group (Setion 3.2 of the A&I paper)
-*    round(#)                 round dependent variable to in # units (=0 for no rounding, the default)
-*                             this rounding is performed after adjusting for covariates, if applicable
-*
-*  REPORTING
-*      level(passthru)              set confidence level; default is level(95)
-*      notable                      suppress table of results
-*      noheader                     suppress table header
-*      nolegend                     suppress table legend
-*      display_options              control spacing and display of omitted variables and base and empty cells
-*                                      display_options:  noomitted, vsquish, noemptycells, baselevels, allbaselevels;
-*                                                        see help estimation options##display_options
-*
-*  BSOPTS SUBOPTIONS
-*     reps(#)                      perform # bootstrap replications; default is reps(200)
-*     saving(filename[,replace])   save bootstrap results to filename (optionally, replace specifies that filename be overwritten, if it exists.)
-*     sepercentile                 obtain bootstrap standard errors from percentiles of bootstrap estimates instead of using Stata's default method.
-*                                      standard error = (p(97.5) - p(2.5)) / (2*1.96), where p(N) is Nth percentile of bootstrap iterations.
-*                                      this is the method used in Athey and Imbens' MATLAB code.
-*     accel(vector)                acceleration values for each statistic
-*     mse                          use MSE formula for variance estimation
-*     nodots                       suppress the replication dots
-*     size(#)                      draw samples of size #
-*                                      without weights, the sample in each group is calculated as the number of observations in the group
-*                                      with fweights, the sample in each group is calculated as the sum of the fweights for observations in the group
-*                                      with iweights, the sample in each group is calculated as the sum of the iweights for observations in the group, divided by the sum of the weights for all observations, and multiplied by the value specified in size()  (rounded to the nearest integer).
-*                                             (by default, size()==the sum of the iweights)
-*                                      with pweights and aweights, the weights are normalized to mean 1. Then, the sample in each group is calculated as the sum of the weights for observations in the group (rounded to the nearest integer).
-*                                   This sub-option is allowed only with pweights, aweights, and iweights. With unweighted samples, you could generate a variable equal to one and use it as an iweight.
-*  The BS sub-options are ignored if you specify vce(none) or vce(delta).
-*  See [R] bootstrap postestimation for features available after estimation.
-
-
-* Weights may be iweights or fweights.
-
-* vce(bootstrap, [bsopts]) is equivalent to the [bootstrap:] prefix as follows:
-*    . bootstrap _b, strata(treat post) [bsopts]: cic y treat post ... , vce(none)
-* but slower because vce(bootstrap) is implimented in META and runs with less overhead.
-* However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other options.
-* in documentation, talk about why bootstrap: prefix might be needed (longitudinal data, sample by id instead of pre/post groups)
-* CIC also works with the [svy bootstrap:] prefix, but you will need to use svyset to set up the bsrweight() variables, PSUs, weights and strata before calling CIC.
-
-* When the [by:] prefix is used, only the last group is saved in ereturn.
-
-
-
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-* TO DO
-* 10. multiple time periods or >2 groups.
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
-mata:
-// mata clear
-mata set matastrict on
-mata set matafavor speed
-end
-* * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
 
 
 
@@ -125,14 +41,14 @@ program define Estimate, eclass byable(recall)
 	}
 
 	// parse arguments
-	syntax varlist(default=none min=3 numeric fv ts) [if] [in] [fweight iweight aweight pweight]  ///
+	syntax varlist(default=none min=3 numeric fv) [if] [in] [fweight iweight aweight]  ///
 		[, at(numlist min=1 >=0 <=100 sort) ///
 		Vce(passthru) ///
 		did ///
 		CONtinuous dci LOWer UPPer all ///
 		UNTreated ///
 		ROUnd(real 0) ///
-		level(passthru) notable NOHeader NOLegend * ] // Reporting options
+		level(passthru) noTABle noHeader noLegend * ] // Reporting options
 	marksample touse  // note that rows are dropped for (1) if/in (2) zero weight (3) missing data (and other reasons, see "help mark")
 	_get_diopts diopts, `options'
 	local diopts `diopts' `table' `header' `legend'
@@ -277,7 +193,7 @@ program define Estimate, eclass byable(recall)
 	if "`untreated'"=="" ereturn local footnote "Effect of Treatment on the Treated Group"
 	else                 ereturn local footnote "Effect of Treatment on the Untreated Group"
 	di as txt e(footnote)
-	if `runDID'                                         di as txt "Traditional DID model" as res " [did], [did_model]" as txt =cond(tot,""," (`untreat' == 1 - `treat')")
+	if `runDID'                                         di as txt "Traditional DID model" as res " [did], [did_model]" as txt =cond(`tot',""," (`untreat' == 1 - `treat')")
 	if `runDID'                                         di as txt "Quantile DID model" as res " [qdid]"
 	if inlist("`estimator'","all","continuous","check") di as txt "Continuous CIC model" as res " [continuous]"
 	if inlist("`estimator'","all","dci")                di as txt "Discrete CIC model (under the conditional independence assumption)" as res " [discrete_ci]"
