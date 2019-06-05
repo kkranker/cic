@@ -1,0 +1,27 @@
+v 3
+d cic Stata implimenation of the Athey and Imbens (2006)
+d Changes-in-Changes model
+d
+d This Stata command implements the changes-in-changes (CIC)
+d model proposed by Athey and Imbens (2006). The command estimates
+d the average and quantile treatment effects of a treatment in settings
+d where repeated cross sections of individuals are observed in a
+d treatment group and a control group, before and after the treatment.
+d The CIC model relaxes several assumptions of the standard linear
+d difference-in-differences model. Both the continuous CIC model
+d and discrete CIC model (with and without a conditional independence
+d assumption) are included in the cic command, as are treatment effects
+d from standard linear difference-in-differences (DID) model and a quantile
+d difference-in-differences model. By implementing the CIC estimator
+d alongside these other two pre-existing estimators, the command
+d can illustrate how the effect the treatment varies across a
+d variety of assumptions.
+
+d See cic.sthlp or README.md for documentation and examples.
+d
+d Package by Keith Kranker
+d
+* Package moved to Git/Github in 2019-06
+*
+f cic.ado
+f cic.sthlp
