@@ -1,5 +1,5 @@
 v 3
-d cic Stata implimenation of the Athey and Imbens (2006)
+d cic Stata implementation  of the Athey and Imbens (2006)
 d Changes-in-Changes model
 d
 d This Stata command implements the changes-in-changes (CIC)
@@ -25,3 +25,4 @@ d
 *
 f cic.ado
 f cic.sthlp
+f cic_examples.do

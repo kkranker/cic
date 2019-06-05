@@ -3,4 +3,4 @@ d Stata package by Keith Kranker
 
 d Packages in this repository are listed below:
 
-p cic Stata implimenation of the Athey and Imbens (2006) Changes-in-Changes model
+p cic Stata implementation of the Athey and Imbens (2006) Changes-in-Changes model

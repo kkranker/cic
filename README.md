@@ -1,4 +1,4 @@
-# cic: Stata implimenation of the Athey and Imbens (2006) Changes-in-Changes model
+# cic: Stata implementation of the Athey and Imbens (2006) Changes-in-Changes model
 
 
 # Description
@@ -26,18 +26,27 @@ I see Blaise Melley also has [his own version of the model for Stata](https://si
 Let's hope this release prevents yet another person from doing this work!
 
 
+# Author
+
+Keith Kranker
+
+Based on Matlab code by Susan Athey & Guido W. Imbens,
+available at https://athey.people.stanford.edu/research
+
+
+
 # Installation
 
 To install from Github, type this from your Stata command line:
 
 ```stata
-. net from https://raw.githubusercontent.com/kkranker/stata-dtalink/master/
+. net from https://raw.githubusercontent.com/kkranker/cic/master/
 ```
 
-To install from Github, type this from your Stata command line:
+(coming soon) To install from SSC, type this from your Stata command line:
 
 ```stata
-. net describe dtalink
+. net describe cic
 ```
 
 The Stata help file (cic.sthlp) provides additional documentation and examples.
@@ -73,11 +82,6 @@ The appendix is also quite helpful.
 The Stata help file (cic.sthlp) provides additional documentation and examples.
 
 
-# Suggested Citation
-
-TBD
-
-
 # Referemces
 
 * Athey, Susan and Guido W. Imbens. "Identification and Inference in Nonlinear Difference-in-Differences Models." *Econometrica*, vol. 74, no. 2, March 2006, pp. 431-497. (http://dx.doi.org/10.1111/j.1468-0262.2006.00668.x)
@@ -86,4 +90,4 @@ TBD
 
 * Kranker, Keith. “The Effect of Disease Management Programs on Medicaid Expenditures.” Doctoral dissertation. College Park, MD: University of Maryland, 2011. (http://hdl.handle.net/1903/12101)
 
-* Kranker, Keith. “Effects of Medicaid Disease Management Programs on Medical Expenditures: Evidence from a Natural Experiment in Georgia.” *Journal of Health Economics*, vol. 46, March 2016, pp. 52-69. (https://doi.org/10.1016/j.jhealeco.2016.01.008)
+* Kranker, Keith. “Effects of Medicaid Disease Management Programs on Medical Expenditures: Evidence from a Natural Experiment in Georgia.” *Journal of Health Economics*, vol. 46, March 2016, pp. 52-69. (http://dx.doi.org/10.1016/j.jhealeco.2016.01.008)
