@@ -171,6 +171,8 @@ Athey and Imbens (2006) proposed a changes-in-changes (CIC) model which generali
 (Thus the standard DID model is nested in the CIC model as a special case.)
 The CIC model estimates the entire distribution of outcomes under the counterfactual,
 allowing one to calculate average treatment effects or estimate effects at specific quantiles.
+
+{pstd}
 This Stata command, `cic`,  implements the CIC estimator from Athey and Imbens (2006).
 `cic` is written in Mata with an effort to maximize parallel computing; in tests (not shown), I found `cic` estimated
 the model more quickly that the Matlab code previously distributed by the Athey and Imbens.
