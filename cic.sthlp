@@ -92,7 +92,7 @@ Weights are not allowed with the {help bootstrap}: prefix.{p_end}
 When the {opt by:} prefix is used, only the last group is saved in ereturn.{p_end}
 {p 4 6 2}
 {marker display_options}{...}
-{opt display_options} include: noomitted, vsquish, noemptycells, baselevels, and allbaselevels;
+{it:display_options} include: noomitted, vsquish, noemptycells, baselevels, and allbaselevels;
 see {help estimation options##display_options:[R] estimation options}.{p_end}
 
 
@@ -230,6 +230,10 @@ Stata code by Keith Kranker
 Based on Matlab code by Susan Athey & Guido W. Imbens,
 available at {browse "https://athey.people.stanford.edu/research"}
 
+{pstd}Suggested Citation:{p_end}
+{phang2}Keith Kranker. "CIC: Stata module to implement the Athey and Imbens (2006) Changes-in-Changes model," Statistical Software Components S458656, Boston College Department of Economics, 2019. Available at https://ideas.repec.org/c/boc/bocode/s458656.html.{p_end}
+
+Source code is available at {browse "https://github.com/kkranker/cic"}
 
 {marker references}{...}
 {title:References}

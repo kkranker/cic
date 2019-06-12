@@ -34,6 +34,11 @@ Based on Matlab code by Susan Athey & Guido W. Imbens,
 available at https://athey.people.stanford.edu/research
 
 
+# Suggested Citation
+
+* Keith Kranker. "CIC: Stata module to implement the Athey and Imbens (2006) Changes-in-Changes model," Statistical Software Components S458656, Boston College Department of Economics, 2019. Available at https://ideas.repec.org/c/boc/bocode/s458656.html.
+
+Source code is available at https://github.com/kkranker/cic
 
 # Installation
 
@@ -43,7 +48,7 @@ To install from Github, type this from your Stata command line:
 . net from https://raw.githubusercontent.com/kkranker/cic/master/
 ```
 
-(coming soon) To install from SSC, type this from your Stata command line:
+To install from SSC, type this from your Stata command line:
 
 ```stata
 . net describe cic
