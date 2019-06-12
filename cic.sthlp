@@ -233,7 +233,7 @@ available at {browse "https://athey.people.stanford.edu/research"}
 {pstd}Suggested Citation:{p_end}
 {phang2}Keith Kranker. "CIC: Stata module to implement the Athey and Imbens (2006) Changes-in-Changes model," Statistical Software Components S458656, Boston College Department of Economics, 2019. Available at https://ideas.repec.org/c/boc/bocode/s458656.html.{p_end}
 
-Source code is available at {browse "https://github.com/kkranker/cic"}
+{pstd}Source code is available at {browse "https://github.com/kkranker/cic"}{p_end}
 
 {marker references}{...}
 {title:References}
