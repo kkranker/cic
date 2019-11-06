@@ -1,7 +1,12 @@
+log using C:\Users\kkranker\Documents\Stata\cic\code-cic\cic_examples.log, replace
+
 *! cic_examples.do
 *! Changes-in-changes
 *! Exmple of how to use the command (from cic.sthlp)
 *! by Keith Kranker
+
+about
+which cic
 
 // setup
 sysuse nlsw88, clear
@@ -16,3 +21,5 @@ cic continuous wage TREAT POST, vce(bootstrap, reps(50))
 bootstrap, reps(50): cic all wage TREAT POST, at(50 90) did vce(none)
 cic all wage TREAT POST, vce(delta) at(50)
 cic dci wage TREAT POST i.occupation, at(50) vce(bootstrap, reps(50))
+
+log close
