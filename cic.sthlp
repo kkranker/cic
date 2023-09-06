@@ -1,6 +1,5 @@
 {smcl}
 {* $Id: cic.sthlp $}{...}
-{* Copyright (C) Mathematica This code cannot be copied, distributed or used without the express written permission of Mathematica Policy Research, Inc.}{...}
 {vieweralsosee "" "--"}{...}
 {viewerjumpto "Title" "cic##title"}{...}
 {viewerjumpto "Syntax" "cic##syntax"}{...}
@@ -38,7 +37,7 @@
 
 {phang}{it:pvar} must contain values 0 or 1, representing the pre-intervention (0) and post-intervention (1) periods.{p_end}
 
-{phang}{it:varlist}      is a (optional) list of covariates variables (see the {help cic##remarks:remarks}) {p_end}
+{phang}{it:varlist} is a (optional) list of covariates variables (see the {help cic##remarks:remarks}) {p_end}
 
 
 {marker estimator}{...}
@@ -46,14 +45,17 @@
 {synopthdr:estimator}
 {synoptline}
 {synopt :{opt continuous}}CIC estimator with continuous outcomes (Athey and Imbens 2006, equation 9){p_end}
-{synopt :{opt dci}}CIC model with discrete outcomes, under the conditional independence assumption  (Athey and Imbens 2006, equation 29){p_end}
-{synopt :{opt bounds}}lower and upper bound estimates of discrete CIC model, without conditional independence (Athey and Imbens 2006, equation 25){p_end}
+{synopt :{opt dci}}CIC model with discrete outcomes, under the conditional independence assumption
+(Athey and Imbens 2006, equation 29){p_end}
+{synopt :{opt bounds}}lower and upper bound estimates of discrete CIC model, without conditional independence
+(Athey and Imbens 2006, equation 25){p_end}
 {synopt :{opt all}}all of the above{p_end}
 {synoptline}
 
 
 {marker options}{...}
 {marker options_table}{...}
+{synoptset 16}{...}
 {synopthdr}
 {synoptline}
 {syntab:Main}
@@ -62,8 +64,9 @@
 default is {opt vce(none)}{p_end}
 {synopt :{opt did}}calculates traditional DID and quantile DID estimates;
 by default this option is off, unless {it:varlist} exists in which case it is turned on{p_end}
-{synopt :{opt unt:reated}}estimates the counterfactual effect of the policy for the untreated group (Athey and Imbens 2006, Setion 3.2){p_end}
-{synopt :{opt rou:nd(#)}} rounds dependent variable to # units (=0 for no rounding, the default);
+{synopt :{opt unt:reated}}estimates the counterfactual effect of the policy for the untreated group
+(Athey and Imbens 2006, Setion 3.2){p_end}
+{synopt :{opt rou:nd(#)}} rounds {it:depvar} to # units (=0 for no rounding, the default);
 any rounding is performed after adjusting for covariates, if applicable{p_end}
 
 {syntab:Reporting}
@@ -71,16 +74,17 @@ any rounding is performed after adjusting for covariates, if applicable{p_end}
 {synopt :{opt notab:le}}suppresses the table of results{p_end}
 {synopt :{opt noh:eader}}suppresses the table header{p_end}
 {synopt :{opt nol:egend}}suppresses the table legend{p_end}
-{synopt :{it:{help cic##display_options:display_options}}}control
-INCLUDE help shortdes-displayoptall
+{synopt :{it:{help cic##display_options:display_options}}}control columns and
+column formats, row spacing, line width, display of omitted variables and base and empty
+cells, and factor-variable labeling{p_end}
 {synoptline}
 {p2colreset}{...}
 {p 4 6 2}
 {it:varlist} may contain factor variables; see {help fvvarlists}.{p_end}
 {p 4 6 2}
-{opt bootstrap}, {opt by}, {opt jackknife}, and {opt statsby} are allowed;{p_end}
+{opt bootstrap}:, {opt by}:, {opt jackknife}:, and {opt statsby}: are allowed;{p_end}
 {p 4 6 2}
-Weights are not allowed with the {helpb bootstrap} prefix.{p_end}
+Weights are not allowed with the {help bootstrap}: prefix.{p_end}
 {marker weight}{...}
 {p 4 6 2}
 {opt fweight}s, {opt iweight}s, and {opt aweight}s are allowed; see {help weight}.{p_end}
@@ -88,15 +92,19 @@ Weights are not allowed with the {helpb bootstrap} prefix.{p_end}
 When the {opt by:} prefix is used, only the last group is saved in ereturn.{p_end}
 {p 4 6 2}
 {marker display_options}{...}
-{opt display_options} include: noomitted, vsquish, noemptycells, baselevels, and allbaselevels; see help estimation options##display_options{p_end}
+{it:display_options} include: noomitted, vsquish, noemptycells, baselevels, and allbaselevels;
+see {help estimation options##display_options:[R] estimation options}.{p_end}
 
 
-{synoptset 16}{...}
+{synoptset 25}{...}
 {synopthdr:bsopts}
 {synoptline}
 {synopt :{opt reps(#)}}                      perform # bootstrap replications; default is 1000{p_end}
-{synopt :{opt saving(filename[,replace])}}   save bootstrap results to filename (optionally, replace specifies that filename be overwritten, if it exists.){p_end}
-{synopt :{opt sepercentile}}                 obtain bootstrap standard errors from percentiles of bootstrap estimates instead of using Stata's default method. standard error = (p(97.5) - p(2.5)) / (2*1.96), where p(N) is Nth percentile of bootstrap iterations (this is the method used in Athey and Imbens' MATLAB code){p_end}
+{synopt :{opt saving(filename[,replace])}}   save bootstrap results to filename (optionally,
+replace specifies that filename be overwritten, if it exists.){p_end}
+{synopt :{opt sepercentile}}                 obtain bootstrap standard errors from percentiles of bootstrap
+estimates instead of using Stata's default method. standard error = (p(97.5) - p(2.5)) / (2*1.96), where p(N)
+is Nth percentile of bootstrap iterations (this is the method used in Athey and Imbens' MATLAB code){p_end}
 {synopt :{opt accel(vector)}}                acceleration values for each statistic{p_end}
 {synopt :{opt mse}}                          use MSE formula for variance estimation{p_end}
 {synopt :{opt nodots}}                       suppress the replication dots{p_end}
@@ -106,24 +114,27 @@ When the {opt by:} prefix is used, only the last group is saved in ereturn.{p_en
 {p 4 6 2}
 {opt vce(bootstrap[, bsopts])} stratifies the sample by {it:tvar} and {it:pvar}{p_end}
 {p 4 6 2}
-The BS sub-options are ignored if you specify vce(none) or vce(delta).{p_end}
-{p 4 6 2}
 See {help bootstrap postestimation} for features available after estimation.{p_end}
 {p 4 6 2}
-vce(bootstrap, [bsopts]) is equivalent to the [bootstrap:] prefix as follows:{p_end}
-{p 4 10 8}
-. bootstrap _b, strata(treat post) [bsopts]: cic y treat post ... , vce(none){p_end}
-{p 4 8 0}but slower because vce(bootstrap) is implimented in META and runs with less overhead.
+The following two lines are equivalent:{p_end}
+{phang2}{cmd: . cic y treat post, vce(bootstrap, [bsopts])}{p_end}
+{phang2}{cmd: . bootstrap _b, strata(treat post) [bsopts]: cic y treat post, vce(none}){p_end}
+{p 4 8 0}However, the second line is slower because vce(bootstrap) is implemented in Mata and runs with less overhead.
 However, the bootstrap prefix is more flexible due the availability of size(), strata(), cluster(), idcluster() and other options.{p_end}
 {p 4 6 2}
-CIC also appears to works with the [svy bootstrap:] prefix, but you will need to use svyset to set up the bsrweight() variables, PSUs, weights and strata before calling CIC.{p_end}
+CIC also appears to works with the {help svy bootstrap}: prefix, but you will need to use {help svyset} to set
+up the bsrweight() variables, PSUs, weights and strata before calling CIC.{p_end}
 {p 4 6 2}
 The sample size for {opt size(#)} is defined as follows:
 without weights, the sample in each group is calculated as the number of observations in the group;
 with fweights, the sample in each group is calculated as the sum of the fweights for observations in the group;
-with iweights, the sample in each group is calculated as the sum of the iweights for observations in the group, divided by the sum of the weights for all observations, and multiplied by the value specified in size()  (rounded to the nearest integer -- by default, size()==the sum of the iweights);
-with aweights, the weights are normalized to mean 1. then, the sample in each group is calculated as the sum of the weights for observations in the group (rounded to the nearest integer).
-This sub-option is allowed only with pweights, aweights, and iweights. With unweighted samples, you could generate a variable equal to one and use it as an iweight.{p_end}
+with iweights, the sample in each group is calculated as the sum of the iweights for observations in the group,
+divided by the sum of the weights for all observations, and multiplied by the value specified in size()
+(rounded to the nearest integer -- by default, size()==the sum of the iweights);
+with aweights, the weights are normalized to mean 1. then, the sample in each group is calculated as the sum
+of the weights for observations in the group (rounded to the nearest integer).
+This sub-option is allowed only with pweights, aweights, and iweights. With unweighted samples,
+you could generate a variable equal to one and use it as an iweight.{p_end}
 
 
 {marker description}{...}
@@ -171,11 +182,13 @@ Athey and Imbens (2006) proposed a changes-in-changes (CIC) model which generali
 (Thus the standard DID model is nested in the CIC model as a special case.)
 The CIC model estimates the entire distribution of outcomes under the counterfactual,
 allowing one to calculate average treatment effects or estimate effects at specific quantiles.
-This Stata command, `cic`,  implements the CIC estimator from Athey and Imbens (2006).
-`cic` is written in Mata with an effort to maximize parallel computing; in tests (not shown), I found `cic` estimated
-the model more quickly that the Matlab code previously distributed by the Athey and Imbens.
-The cic command also offers several previously unavailable features (e.g., to allow for covariates).
-In addition, you can use Stata's `bootstrap:` prefix, which offers more flexibility for
+
+{pstd}
+This Stata command, {cmd:cic},  implements the CIC estimator from Athey and Imbens (2006).
+{cmd:cic} is written in Mata with an effort to maximize parallel computing; in tests (not shown),
+I found {cmd:cic} estimated the model more quickly than the Matlab code previously distributed by Athey and Imbens.
+The {cmd:cic} command also offers several previously unavailable features (e.g., to allow for covariates).
+In addition, you can use Stata's {help bootstrap}: prefix, which offers more flexibility for
 computing bootstrapped standard errors (e.g., strata, blocks).
 
 {pstd}
@@ -184,9 +197,9 @@ Athey and Imbens (2006) explain their methods (with proofs) in a fairly long and
 The appendix is also quite helpful.
 
 {pstd}
-Covaraiates  are implimented according to parametric approach outlined in section 5.1. of Athey and Imbens (2006).
-"... apply the CIC estimator to the residuals from an ordinary least squares regression with the effects of the dummy
-variables added back in." (p. 466)
+Covaraiates are implemented according to the parametric approach outlined by Athey and Imbens (2006):
+"... apply the CIC estimator to the residuals from an ordinary least squares regression
+with the effects of the dummy variables added back in." (p. 466)
 
 
 {marker examples}{...}
@@ -201,13 +214,9 @@ variables added back in." (p. 466)
 {phang2}{cmd:. replace wage = wage - POST}{p_end}
 
 {pstd}Estimate{p_end}
-
 {phang2}{cmd:. cic continuous wage TREAT POST, vce(bootstrap, reps(50))}{p_end}
-
 {phang2}{cmd:. bootstrap, reps(50): cic all wage TREAT POST, at(50 90) did vce(none)}{p_end}
-
 {phang2}{cmd:. cic all wage TREAT POST, vce(delta) at(50)}{p_end}
-
 {phang2}{cmd:. cic dci wage TREAT POST i.occupation, at(50) vce(bootstrap, reps(50))}{p_end}
 
 
@@ -221,19 +230,29 @@ Stata code by Keith Kranker
 Based on Matlab code by Susan Athey & Guido W. Imbens,
 available at {browse "https://athey.people.stanford.edu/research"}
 
+{pstd}Suggested Citation:{p_end}
+{phang2}Keith Kranker. "CIC: Stata module to implement the Athey and Imbens (2006) Changes-in-Changes model," Statistical Software Components S458656, Boston College Department of Economics, 2019. Available at https://ideas.repec.org/c/boc/bocode/s458656.html.{p_end}
+
+{pstd}Source code is available at {browse "https://github.com/kkranker/cic"}.
+Please report issues at  {browse "https://github.com/kkranker/cic/issues"}.{p_end}
+
 
 {marker references}{...}
 {title:References}
 
 {psee}
-Athey, Susan and Guido W. Imbens. "Identification and Inference in Nonlinear Difference-in-Differences Models." *Econometrica*, vol. 74, no. 2, March 2006, pp. 431-497. ({browse "http://dx.doi.org/10.1111/j.1468-0262.2006.00668.x"})
+Athey, Susan and Guido W. Imbens. "Identification and Inference in Nonlinear Difference-in-Differences Models."
+*Econometrica*, vol. 74, no. 2, March 2006, pp. 431-497. ({browse "http://dx.doi.org/10.1111/j.1468-0262.2006.00668.x"})
 
 {psee}
-Imbens, Guido W. and Jeffery M. Wooldridge. “Recent Developments in the Econometrics of Program Evaluation.” *Journal of Economic Literature*, vol. 47, no. 1, 2009, pp. 5–86. ({browse "http://dx.doi.org/10.1257/jel.47.1.5"})
+Imbens, Guido W. and Jeffery M. Wooldridge. "Recent Developments in the Econometrics of Program Evaluation."
+*Journal of Economic Literature*, vol. 47, no. 1, 2009, pp. 5–86. ({browse "http://dx.doi.org/10.1257/jel.47.1.5"})
 
 {psee}
-Kranker, Keith. “The Effect of Disease Management Programs on Medicaid Expenditures.” Doctoral dissertation. College Park, MD: University of Maryland, 2011. ({browse "http://hdl.handle.net/1903/12101"})
+Kranker, Keith. "The Effect of Disease Management Programs on Medicaid Expenditures."
+Doctoral dissertation. College Park, MD: University of Maryland, 2011. ({browse "http://hdl.handle.net/1903/12101"})
 
 {psee}
-Kranker, Keith. “Effects of Medicaid Disease Management Programs on Medical Expenditures: Evidence from a Natural Experiment in Georgia.” *Journal of Health Economics*, vol. 46, March 2016, pp. 52-69.
+Kranker, Keith. "Effects of Medicaid Disease Management Programs on Medical Expenditures: Evidence from a Natural Experiment in Georgia."
+*Journal of Health Economics*, vol. 46, March 2016, pp. 52-69.
 ({browse "http://dx.doi.org/10.1016/j.jhealeco.2016.01.008"}){p_end}
