@@ -47,7 +47,7 @@ Please report issues at https://github.com/kkranker/cic/issues.
 To install from Github, type this from your Stata command line:
 
 ```stata
-. net from https://raw.githubusercontent.com/kkranker/cic/master/
+. net from https://raw.githubusercontent.com/kkranker/cic/main/
 ```
 
 To install from SSC, type this from your Stata command line:
