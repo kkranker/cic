@@ -1,0 +1,18 @@
+The Stata CIC code used to exist at 
+- the dissertation folders (C:\Users\kkranker\Documents\Dissertation\Stata-Changes-in-Changes) 
+- and it's repository (https://bitbucket.org/keithk/dissertation-cic-stata/src/default/)
+- and it's sub-repository (https://bitbucket.org/keithk/dissertation-cic-article/src/default/) 
+
+On 6/1/2019 I decided to leave this code alone as a permanent archive, and start develing the 
+code/documatation at 
+
+C:\Users\kkranker\Documents\Stata\cic
+
+... and publishing the code on github.com
+
+
+I copied the repo into the new folder,
+stripped out lots of commits (e.g., copes of the Matlab code, fits and starts at a journal artilce)
+converted to Git
+saved the new Git repo in a subfolder
+deleted intermediate files.
